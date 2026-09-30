@@ -159,6 +159,10 @@ pub trait Driver {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Receipt {
+    /// Boot fencing and trusted principal make exported receipts unambiguous.
+    pub boot_id: u64,
+    pub principal: u64,
+    pub safety_flags: u32,
     pub receipt_id: u64,
     pub action_id: u64,
     pub sequence: u64,
@@ -179,6 +183,19 @@ pub struct Receipt {
     pub original_receipt: u64,
     pub dispatched: bool,
     pub observed_valid: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub boot_id: u64,
+    pub epoch: u64,
+    pub now: u64,
+    pub sensor_tick: u64,
+    pub flags: u32,
+    pub state: RuntimeState,
+    pub active_leases: u8,
+    pub retained_receipts: usize,
+    pub next_receipt_id: u64,
 }
 
 #[derive(Clone, Copy, Debug)]

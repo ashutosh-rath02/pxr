@@ -142,6 +142,22 @@ impl Runtime {
     pub fn receipt_count(&self) -> usize {
         self.receipt_count
     }
+    pub fn config(&self) -> Config {
+        self.config
+    }
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            boot_id: self.boot_id,
+            epoch: self.epoch,
+            now: self.last_tick,
+            sensor_tick: self.state_at,
+            flags: self.flags,
+            state: self.state,
+            active_leases: self.leases.iter().flatten().count() as u8,
+            retained_receipts: self.receipt_count,
+            next_receipt_id: self.next_receipt,
+        }
+    }
     /// Oldest retained receipt first. Overwrite is bounded and observable via receipt IDs.
     pub fn receipt(&self, index: usize) -> Option<Receipt> {
         if index >= self.receipt_count {
@@ -162,8 +178,19 @@ impl Runtime {
         self.receipt_count = (self.receipt_count + 1).min(RECEIPT_CAPACITY);
         receipt
     }
-    fn event(&mut self, resource: u8, lease_id: u64, decision: Decision, reason: Reason, now: u64) {
+    fn event(
+        &mut self,
+        resource: u8,
+        lease_id: u64,
+        principal: u64,
+        decision: Decision,
+        reason: Reason,
+        now: u64,
+    ) {
         self.record(Receipt {
+            boot_id: self.boot_id,
+            principal,
+            safety_flags: self.flags,
             receipt_id: 0,
             action_id: 0,
             sequence: 0,
@@ -202,6 +229,7 @@ impl Runtime {
         driver: &mut impl Driver,
     ) -> bool {
         let lease = self.leases[resource].map_or(0, |l| l.id);
+        let principal = self.leases[resource].map_or(0, |l| l.owner);
         self.active[resource] = None;
         self.leases[resource] = None;
         self.bump_epoch();
@@ -209,6 +237,7 @@ impl Runtime {
         self.event(
             resource as u8,
             lease,
+            principal,
             Decision::Fallback,
             if ok { reason } else { Reason::Driver },
             now,
@@ -293,8 +322,11 @@ impl Runtime {
     }
 
     pub fn emergency_stop(&mut self, now: u64, driver: &mut impl Driver) {
+        // E-stop always wins, even with a regressed timestamp. It also fences subsequent
+        // state updates/recovery against an older clock value.
+        self.last_tick = self.last_tick.max(now);
         self.flags |= self.config.estop_mask;
-        self.trip(Reason::Estop, now, driver);
+        self.trip(Reason::Estop, self.last_tick, driver);
     }
 
     /// This API must only be exposed to a trusted local operator/interlock.
@@ -393,6 +425,7 @@ impl Runtime {
         self.event(
             request.resource,
             lease.id,
+            lease.owner,
             Decision::Control,
             Reason::LeaseGranted,
             now,
@@ -430,6 +463,7 @@ impl Runtime {
         self.event(
             i as u8,
             lease_id,
+            lease.owner,
             Decision::Control,
             Reason::LeaseRenewed,
             now,
@@ -540,11 +574,17 @@ impl Runtime {
     ) -> Receipt {
         self.tick(now, driver);
         let mut receipt = Receipt {
+            boot_id: self.boot_id,
+            principal,
+            safety_flags: self.flags,
             receipt_id: 0,
             action_id: action.action_id,
             sequence: action.sequence,
             capability: action.capability,
-            resource: u8::MAX,
+            resource: self
+                .capabilities()
+                .find(|c| c.id == action.capability)
+                .map_or(u8::MAX, |c| c.resource),
             lease_id: action.lease_id,
             decision: Decision::Rejected,
             reason: Reason::Ok,

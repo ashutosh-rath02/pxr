@@ -48,10 +48,25 @@ int main(void) {
     put(frame + 36, 1, 8); put(frame + 44, 1, 8); put(frame + 52, lease.epoch, 8);
     put(frame + 68, 20, 8); put(frame + 76, 100, 4); put(frame + 80, 400, 4);
     put(frame + 84, (uint32_t)-200, 4); put(frame + 88, crc(frame, 88), 4);
+    pxr_action action = {42,7,lease.id,1,1,lease.epoch,0,20,100,{400,-200},1,0};
+    uint8_t encoded[PXR_FRAME_SIZE];
+    assert(pxr_encode_action(&action,encoded,sizeof(encoded)) == 0);
+    assert(memcmp(frame,encoded,sizeof(frame)) == 0);
+    pxr_action decoded;
+    assert(pxr_decode_action(encoded,sizeof(encoded),&decoded) == 0);
+    assert(decoded.parameters[1] == -200 && decoded.boot_id == 42);
+    pxr_snapshot_record snapshot;
+    assert(pxr_snapshot(storage,&snapshot) == 0 && snapshot.active_leases == 1);
+    pxr_capability descriptor;
+    assert(pxr_get_capability(storage,0,&descriptor) == 0 && descriptor.id == 1);
+    assert(pxr_get_capability(storage,4,&descriptor) == -4);
     pxr_receipt_record receipt;
     assert(pxr_submit(storage, frame, sizeof(frame), 7, 0, 0, &receipt) == 0);
     assert(receipt.decision == PXR_EXECUTED && receipt.observed[0] == 400 && receipt.observed[1] == -200);
     assert(receipt.dispatched && receipt.observed_valid && executions == 1);
+    uint8_t receipt_frame[PXR_RECEIPT_FRAME_SIZE];
+    assert(pxr_receipt_frame(storage,1,receipt_frame,sizeof(receipt_frame)) == 0);
+    assert(memcmp(receipt_frame,"PXRR",4) == 0 && receipt_frame[8] == 42 && receipt_frame[16] == 7);
     assert(pxr_submit(storage, frame, sizeof(frame), 7, 0, 0, &receipt) == 0);
     assert(receipt.reason == 4 && executions == 1);
     frame[80] ^= 1;
@@ -72,6 +87,11 @@ int main(void) {
     assert(pxr_recover_local(storage, 0) == 0);
     assert(pxr_acquire(storage, 7, 0, 2, 100, -100, 100, -100, 100, 0, &lease) == 0);
     assert(pxr_cancel(storage, 7, lease.id, 0) == 0);
+    pxr_config config;
+    assert(pxr_default_config(&config) == 0);
+    config.max_lease_ms = 25;
+    assert(pxr_init_config(storage,sizeof(storage),44,0,0,callbacks,&config,NULL,0) == 0);
+    assert(pxr_acquire(storage,7,0,2,26,-100,100,-100,100,0,&lease) == 10);
     printf("C ABI verified: context=%zu bytes, receipt=%zu bytes, executions=%u\n", pxr_context_size(), sizeof(receipt), executions);
     return 0;
 }

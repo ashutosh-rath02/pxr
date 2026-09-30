@@ -1,4 +1,4 @@
-use pxr_runtime_codec::{decode, encode, FRAME_SIZE};
+use pxr_runtime_codec::{decode, decode_receipt, encode, encode_receipt, FRAME_SIZE};
 use pxr_runtime_core::{profile::*, *};
 use pxr_runtime_sim::*;
 use std::{env, hint::black_box, process::ExitCode, time::Instant};
@@ -22,8 +22,8 @@ fn label(r: Receipt) -> &'static str {
     }
 }
 fn print_receipt(r: Receipt) {
-    println!("{{\"receipt_id\":{},\"action_id\":{},\"sequence\":{},\"capability\":{},\"resource\":{},\"lease_id\":{},\"decision\":\"{:?}\",\"reason\":\"{:?}\",\"status\":\"{}\",\"epoch\":{},\"received_at\":{},\"admitted_at\":{},\"executed_at\":{},\"requested\":[{},{}],\"observed\":[{},{}],\"pre_state\":{},\"post_state\":{},\"original_receipt\":{},\"dispatched\":{},\"observed_valid\":{}}}",
-        r.receipt_id, r.action_id, r.sequence, r.capability, r.resource, r.lease_id, r.decision, r.reason, label(r),
+    println!("{{\"boot_id\":{},\"principal\":{},\"safety_flags\":{},\"receipt_id\":{},\"action_id\":{},\"sequence\":{},\"capability\":{},\"resource\":{},\"lease_id\":{},\"decision\":\"{:?}\",\"reason\":\"{:?}\",\"status\":\"{}\",\"epoch\":{},\"received_at\":{},\"admitted_at\":{},\"executed_at\":{},\"requested\":[{},{}],\"observed\":[{},{}],\"pre_state\":{},\"post_state\":{},\"original_receipt\":{},\"dispatched\":{},\"observed_valid\":{}}}",
+        r.boot_id, r.principal, r.safety_flags, r.receipt_id, r.action_id, r.sequence, r.capability, r.resource, r.lease_id, r.decision, r.reason, label(r),
         r.epoch, r.received_at, r.admitted_at, r.executed_at, r.requested[0], r.requested[1],
         r.observed[0], r.observed[1], r.pre_state, r.post_state, r.original_receipt, r.dispatched, r.observed_valid);
 }
@@ -234,9 +234,10 @@ fn bench(n: usize) -> Result<(), String> {
 }
 
 /// A deliberately small, reproducible trace language. No wall clock or transport is involved.
-fn replay(path: &str) -> Result<(), String> {
+fn replay(path: &str, audit: bool) -> Result<(), String> {
     let source = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let mut s = Simulation::default();
+    let mut last_receipt = 0;
     for (line, raw) in source.lines().enumerate() {
         let words: Vec<_> = raw
             .split('#')
@@ -297,7 +298,10 @@ fn replay(path: &str) -> Result<(), String> {
                 a.valid_for_ms = u32n(7)?;
                 a.based_on_epoch = n(8)?;
                 a.execute_after = n(9)?;
-                print_receipt(s.submit(a));
+                let r = s.submit(a);
+                if !audit {
+                    print_receipt(r);
+                }
             }
             _ => {
                 return Err(error(
@@ -305,9 +309,39 @@ fn replay(path: &str) -> Result<(), String> {
                 ))
             }
         }
+        if audit {
+            for i in 0..s.runtime.receipt_count() {
+                let r = s.runtime.receipt(i).unwrap();
+                if r.receipt_id > last_receipt {
+                    if r.receipt_id != last_receipt + 1 {
+                        return Err(error("receipt ring overflowed before export"));
+                    }
+                    print_receipt(r);
+                    last_receipt = r.receipt_id;
+                }
+            }
+        }
     }
     println!("{{\"final_state\":\"{:?}\",\"tick\":{},\"epoch\":{},\"velocity\":[{},{}],\"gripper_open\":{},\"driver_executions\":{},\"fallback_calls\":{}}}",
         s.runtime.state(), s.now, s.runtime.epoch(), s.driver.velocity[0], s.driver.velocity[1], s.driver.gripper_open, s.driver.executions, s.driver.fallbacks);
+    Ok(())
+}
+
+fn inspect(hex: &str) -> Result<(), String> {
+    if (hex.len() != FRAME_SIZE * 2 && hex.len() != 280) || !hex.is_ascii() {
+        return Err("expected 184 or 280 hexadecimal characters".into());
+    }
+    let bytes: Result<Vec<u8>, _> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
+        .collect();
+    let bytes = bytes.map_err(|_| "invalid hexadecimal frame")?;
+    if bytes.len() == FRAME_SIZE {
+        let a = decode(&bytes).map_err(|e| format!("invalid action: {e:?}"))?;
+        println!("{{\"boot_id\":{},\"requester\":{},\"lease_id\":{},\"action_id\":{},\"sequence\":{},\"capability\":{},\"epoch\":{},\"execute_after\":{},\"deadline\":{},\"valid_for_ms\":{},\"parameters\":[{},{}]}}",a.boot_id,a.requester,a.lease_id,a.action_id,a.sequence,a.capability,a.based_on_epoch,a.execute_after,a.deadline,a.valid_for_ms,a.parameters[0],a.parameters[1]);
+    } else {
+        print_receipt(decode_receipt(&bytes).map_err(|e| format!("invalid receipt: {e:?}"))?);
+    }
     Ok(())
 }
 
@@ -318,7 +352,25 @@ fn run() -> Result<(), String> {
         Some("bench") if args.len() <= 2 => bench(args.get(1).map_or(Ok(20000), |s| {
             s.parse().map_err(|_| "invalid iteration count")
         })?),
-        Some("replay") if args.len() == 2 => replay(&args[1]),
+        Some("replay") if args.len() == 2 => replay(&args[1], false),
+        Some("replay") if args.len() == 3 && args[1] == "--audit" => replay(&args[2], true),
+        Some("inspect") if args.len() == 2 => inspect(&args[1]),
+        Some("capabilities") if args.len() == 1 => {
+            for c in CAPABILITIES {
+                println!("{{\"id\":{},\"resource\":{},\"class\":\"{:?}\",\"parameters\":{},\"bounds\":[[{},{}],[{},{}]],\"require_set\":{},\"require_clear\":{}}}", c.id,c.resource,c.class,c.parameter_count,c.bounds[0].min,c.bounds[0].max,c.bounds[1].min,c.bounds[1].max,c.require_set,c.require_clear);
+            }
+            Ok(())
+        }
+        Some("receipt-frame") if args.len() == 1 => {
+            let mut s = Simulation::default();
+            let l = s.grant(0, 500).unwrap();
+            let a = s.action(l, DRIVE, 99, [400, -200]);
+            for b in encode_receipt(&s.submit(a)) {
+                print!("{b:02x}");
+            }
+            println!();
+            Ok(())
+        }
         Some("frame") if args.len() == 1 => {
             let mut s = Simulation::default();
             let l = s.grant(0, 500).unwrap();
@@ -333,7 +385,7 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         None | Some("--help") | Some("help") => {
-            println!("PXR — deterministic physical execution runtime\n\n  pxr demo             Run nine checked failure scenarios (JSONL)\n  pxr bench [count]    Measure admission, duplicate and direct driver paths (JSON)\n  pxr replay FILE      Run a deterministic .pxr trace (JSONL)\n  pxr frame            Print a reference action frame as hex\n\nSimulation / research release. See SAFETY_MODEL.md for integration obligations.");
+            println!("PXR — deterministic physical execution runtime\n\n  pxr demo             Run nine checked failure scenarios (JSONL)\n  pxr bench [count]    Measure admission, duplicate and direct driver paths (JSON)\n  pxr replay FILE      Run a deterministic .pxr trace (JSONL)\n  pxr replay --audit FILE  Include lease and fallback receipts\n  pxr capabilities     Print static capability descriptors\n  pxr inspect HEX      Decode an action or receipt frame\n  pxr receipt-frame    Print a reference receipt frame as hex\n  pxr frame            Print a reference action frame as hex\n\nSimulation / research release. See SAFETY_MODEL.md for integration obligations.");
             Ok(())
         }
         _ => Err("unknown command; run pxr --help".into()),

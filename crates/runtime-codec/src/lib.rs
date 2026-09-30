@@ -2,6 +2,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 use pxr_runtime_core::Action;
+mod receipt;
+pub use receipt::{decode_receipt, encode_receipt, RECEIPT_FRAME_SIZE};
 
 pub const FRAME_SIZE: usize = 92;
 pub const VERSION: u8 = 1;
@@ -12,6 +14,7 @@ pub enum DecodeError {
     Version,
     Reserved,
     Checksum,
+    Value,
 }
 
 /// CRC-32/ISO-HDLC, polynomial 0xedb88320, initial/final XOR 0xffffffff.

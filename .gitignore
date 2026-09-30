@@ -3,6 +3,8 @@
 /dist/
 *.log
 __pycache__/
+/artifact-manifest.json
+/benchmark.json
 .env
 .env.*
 !.env.example

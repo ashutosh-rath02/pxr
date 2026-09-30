@@ -14,6 +14,7 @@ extern "C" {
  * No function allocates. Compile-time capabilities are copied at initialization.
  */
 #define PXR_FRAME_SIZE 92
+#define PXR_RECEIPT_FRAME_SIZE 140
 #define PXR_MAX_CAPABILITIES 16
 #define PXR_RECEIPT_CAPACITY 64
 #define PXR_EXECUTED 0
@@ -47,6 +48,24 @@ typedef struct {
     uint8_t decision, resource, dispatched, observed_valid;
 } pxr_receipt_record;
 
+/* Additive SDK API introduced in 0.2; ABI 1 functions and layouts remain supported. */
+typedef struct {
+    uint64_t boot_id, requester, lease_id, action_id, sequence, based_on_epoch, execute_after, deadline;
+    uint32_t valid_for_ms;
+    int32_t parameters[2];
+    uint16_t capability, reserved;
+} pxr_action;
+typedef struct {
+    uint32_t watchdog_ms, state_ttl_ms, max_lease_ms, max_valid_for_ms, estop_mask;
+    uint16_t invalid_limit, reserved;
+} pxr_config;
+typedef struct {
+    uint64_t boot_id, epoch, now, sensor_tick, next_receipt_id;
+    uint32_t flags;
+    uint16_t retained_receipts;
+    uint8_t state, active_leases;
+} pxr_snapshot_record;
+
 /* Errors: -1 invalid pointer/size, -2 invalid frame, -3 invalid configuration or
  * startup fallback failure, -4 no retained receipt. Positive errors are Reason IDs.
  * No C ABI can validate dangling pointers, buffer lengths or concurrent access.
@@ -59,6 +78,15 @@ int32_t pxr_init(void *storage, size_t length, uint64_t boot_id, uint64_t now,
     uint32_t initial_flags, pxr_callbacks callbacks);
 int32_t pxr_init_custom(void *storage, size_t length, uint64_t boot_id, uint64_t now,
     uint32_t initial_flags, pxr_callbacks callbacks, const pxr_capability *specs, size_t count);
+int32_t pxr_default_config(pxr_config *out);
+/* count=0 uses reference capabilities; config/specs are copied, no pointer retained. */
+int32_t pxr_init_config(void *, size_t, uint64_t boot_id, uint64_t now, uint32_t initial_flags,
+    pxr_callbacks, const pxr_config *, const pxr_capability *specs, size_t count);
+int32_t pxr_encode_action(const pxr_action *, uint8_t *out, size_t length);
+int32_t pxr_decode_action(const uint8_t *, size_t length, pxr_action *out);
+int32_t pxr_snapshot(const void *, pxr_snapshot_record *out);
+int32_t pxr_get_capability(const void *, size_t index, pxr_capability *out);
+int32_t pxr_receipt_frame(const void *, size_t index, uint8_t *out, size_t length);
 /* initial_flags must come from trusted local sensors. Refresh with pxr_update_state.
  * Defaults: supervisor <=50 ms, sensor age <250 ms, max lease 2000 ms, max TTL 1000 ms.
  * Authority adapter must authenticate and authorize requests before acquire/renew.

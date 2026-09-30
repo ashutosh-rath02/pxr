@@ -6,6 +6,8 @@ use core::{
     ptr, slice,
 };
 use pxr_runtime_core::{profile::CAPABILITIES, *};
+mod sdk;
+pub use sdk::*;
 
 #[cfg(not(feature = "std"))]
 #[panic_handler]
@@ -176,9 +178,11 @@ pub unsafe extern "C" fn pxr_init(
             initial_flags,
             callbacks,
             &CAPABILITIES,
+            Config::default(),
         )
     }
 }
+#[allow(clippy::too_many_arguments)] // mirrors the C initialization boundary
 unsafe fn initialize(
     storage: *mut c_void,
     length: usize,
@@ -187,6 +191,7 @@ unsafe fn initialize(
     initial_flags: u32,
     mut callbacks: Callbacks,
     caps: &[Capability],
+    config: Config,
 ) -> i32 {
     if !valid_pointer(storage.cast::<Context>())
         || length < size_of::<Context>()
@@ -196,14 +201,7 @@ unsafe fn initialize(
     {
         return -1;
     }
-    let runtime = match Runtime::new(
-        Config::default(),
-        caps,
-        boot_id,
-        now,
-        initial_flags,
-        &mut callbacks,
-    ) {
+    let runtime = match Runtime::new(config, caps, boot_id, now, initial_flags, &mut callbacks) {
         Ok(r) => r,
         Err(_) => return -3,
     };
@@ -288,6 +286,7 @@ pub unsafe extern "C" fn pxr_init_custom(
             initial_flags,
             callbacks,
             &caps[..count],
+            Config::default(),
         )
     }
 }

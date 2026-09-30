@@ -23,6 +23,8 @@ assert [r["status"] for r in demo] == [
 assert demo[0]["observed_valid"] and demo[0]["dispatched"]
 assert not demo[1]["dispatched"] and not demo[1]["observed_valid"]
 assert demo[-1]["decision"] == "Failed" and demo[-1]["dispatched"]
+assert all(r["boot_id"] == 42 for r in demo)
+assert demo[0]["principal"] == 7
 
 trace = run("replay", "examples/demo.pxr")
 for _ in range(20):
@@ -39,6 +41,19 @@ assert len(frame) == 92
 assert run("frame").strip().decode() == frame.hex()
 vector = json.loads((ROOT / "tests/vectors/action-v1.json").read_text())
 assert frame.hex() == vector["hex"]
+assert json.loads(run("inspect",frame.hex()))["parameters"] == [400,-200]
+receipt=bytes.fromhex(run("receipt-frame").strip().decode())
+assert len(receipt)==140 and receipt[:4]==b"PXRR"
+assert zlib.crc32(receipt[:136])==struct.unpack_from("<I",receipt,136)[0]
+assert struct.unpack_from("<QQ",receipt,8)==(42,7)
+assert struct.unpack_from("<Q",receipt,32)[0]==2
+assert struct.unpack_from("<ii",receipt,112)==(400,-200)
+assert json.loads(run("inspect",receipt.hex()))["decision"]=="Executed"
+caps=[json.loads(line) for line in run("capabilities").splitlines()]
+assert [c["id"] for c in caps]==[1,2,3,4]
+audit=[json.loads(line) for line in run("replay","--audit","examples/demo.pxr").splitlines()]
+assert [r["receipt_id"] for r in audit[:-1]]==list(range(1,len(audit)))
+assert any(r.get("reason")=="StreamExpired" for r in audit)
 
 for args in [("missing-command",), ("bench", "0"), ("replay", "missing-file.pxr")]:
     result = subprocess.run([str(binary), *args], capture_output=True, cwd=ROOT)

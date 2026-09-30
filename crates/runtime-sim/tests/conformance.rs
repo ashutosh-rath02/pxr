@@ -395,6 +395,67 @@ fn fixed_runtime_storage_fits_working_memory_target() {
 }
 
 #[test]
+fn estop_fences_old_sensor_updates_and_recovery() {
+    let (mut s, _, a) = driving();
+    s.submit(a);
+    s.runtime.emergency_stop(100, &mut s.driver);
+    assert_eq!(s.runtime.snapshot().now, 100);
+    s.runtime.update_state(0, 99, &mut s.driver);
+    assert_ne!(s.runtime.flags() & ESTOP, 0);
+    assert!(s.runtime.recover_local(99, &mut s.driver).is_err());
+    s.runtime.update_state(0, 100, &mut s.driver);
+    s.runtime.recover_local(100, &mut s.driver).unwrap();
+}
+
+#[test]
+fn regressed_estop_still_stops_and_preserves_clock_fence() {
+    let (mut s, _, a) = driving();
+    s.submit(a);
+    s.advance(10);
+    s.runtime.emergency_stop(5, &mut s.driver);
+    assert_eq!(s.driver.velocity, [0; 2]);
+    assert_eq!(s.runtime.snapshot().now, 10);
+    assert_eq!(s.runtime.state(), RuntimeState::Estopped);
+}
+
+#[test]
+fn exported_receipts_preserve_authority_and_corruption_is_detected() {
+    use pxr_runtime_codec::{decode_receipt, encode_receipt, RECEIPT_FRAME_SIZE};
+    let (mut s, _, a) = driving();
+    let receipt = s.submit(a);
+    assert_eq!(receipt.boot_id, 42);
+    assert_eq!(receipt.principal, 7);
+    let frame = encode_receipt(&receipt);
+    assert_eq!(decode_receipt(&frame), Ok(receipt));
+    for bit in 0..RECEIPT_FRAME_SIZE * 8 {
+        let mut bad = frame;
+        bad[bit / 8] ^= 1 << (bit % 8);
+        assert!(decode_receipt(&bad).is_err());
+    }
+    s.advance(100);
+    let fallback = s.runtime.receipt(s.runtime.receipt_count() - 1).unwrap();
+    assert_eq!(fallback.principal, 7);
+    assert_eq!(fallback.lease_id, 1);
+}
+
+#[test]
+fn receipt_decoder_rejects_unknown_enums_even_with_valid_crc() {
+    use pxr_runtime_codec::*;
+    let (mut s, _, a) = driving();
+    let frame = encode_receipt(&s.submit(a));
+    for offset in [130, 132, 134, 135] {
+        let mut bad = frame;
+        bad[offset] = 255;
+        let crc = crc32(&bad[..136]);
+        bad[136..].copy_from_slice(&crc.to_le_bytes());
+        assert_eq!(decode_receipt(&bad), Err(DecodeError::Value));
+    }
+    for n in 0..140 {
+        assert_eq!(decode_receipt(&frame[..n]), Err(DecodeError::Length));
+    }
+}
+
+#[test]
 fn randomized_fault_sequences_preserve_motion_invariants() {
     let mut s = Simulation::default();
     let mut seed = 0x5eedu32;
