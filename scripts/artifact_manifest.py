@@ -13,6 +13,8 @@ kind=sys.argv[1]
 if kind=="host":
     files=[root/"target/release"/name for name in ("pxr","pxr.exe","libpxr_runtime_c_api.a","pxr_runtime_c_api.lib")]
     files=[p for p in files if p.is_file()]+[root/"benchmark.json"]
+    if (root/"target/comparison.json").is_file():
+        files.append(root/"target/comparison.json")
 elif kind=="emulated-firmware":
     files=sorted(p for p in (root/"target/qemu").glob("*") if p.is_file())
 else:

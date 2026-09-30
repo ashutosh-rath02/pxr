@@ -19,6 +19,7 @@ jobs:
       - run: cargo +stable test --workspace --locked
       - run: cargo +stable run --locked -p pxr-runtime-core --example embedding
       - run: cargo +stable build --workspace --release --locked
+      - run: python scripts/compare.py --runs 3 --output target/comparison.json
       - if: runner.os != 'Windows'
         run: python3 scripts/verify_cli.py target/release/pxr
       - if: runner.os == 'Windows'
@@ -41,6 +42,7 @@ jobs:
             target/release/libpxr_runtime_c_api.a
             target/release/pxr_runtime_c_api.lib
             benchmark.json
+            target/comparison.json
             artifact-manifest.json
   embedded:
     strategy:
