@@ -1,145 +1,208 @@
-# PXR — Physical Execution Runtime
+# PXR
 
-An open, embedded-first execution boundary between AI-generated actions and physical
-actuators. Rust `no_std` core, fixed memory, transport-independent semantics, C ABI.
+### Deterministic action admission for embedded systems
 
-**v0.2 is an experimental SDK release.** It includes a simulator, C and Rust embedding
-examples, and bare-metal firmware tested on Cortex-M and RISC-V under QEMU.
-Physical safety and board timing require device-specific validation.
+[![CI](https://github.com/ashutosh-rath02/pxr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ashutosh-rath02/pxr/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust: 1.85+](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](Cargo.toml)
+
+PXR checks actuator commands against local authority, timing, parameter limits,
+and device state before calling a driver. When a command stream or lease expires,
+the local controller invokes its configured fallback.
+
+**Rust `no_std` · Fixed memory · C/C++ interface · No external Rust dependencies**
+
+[Quickstart](#quickstart) · [Embedding](#embedding) · [Benchmarks](#benchmarks) · [Downloads](https://github.com/ashutosh-rath02/pxr/releases/tag/v0.2.0)
 
 ```text
-AI / planner -> trusted adapter -> PXR -> existing driver -> actuator
-                                   ^
-                      local sensors, clock, e-stop
+Planner → authenticated adapter → PXR → device driver → actuator
+                                   ↑
+                        local sensors, clock, e-stop
 ```
 
-## Try it
+Use PXR when an AI system, planner, or remote application sends bounded commands
+and the device must decide whether each command is still authorized and valid.
+The application supplies the transport, authenticated identity, sensors, and drivers.
 
-Install [Rust](https://www.rust-lang.org/tools/install) (1.85 or newer), then:
+**Status:** v0.2.0 developer preview. Host tests and Cortex-M/RISC-V emulation pass.
+Physical board timing and actuator behavior require device-specific validation.
 
-```sh
-git clone https://github.com/ashutosh-rath02/pxr.git
-cd pxr
-cargo run --release -p pxr-runtime-sim -- demo
-cargo run --release -p pxr-runtime-sim -- replay examples/demo.pxr
-cargo run --release -p pxr-runtime-sim -- bench 20000
-```
+## Quickstart
 
-Or install the CLI directly from the release tag:
+With [Rust 1.85 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
 cargo install --git https://github.com/ashutosh-rath02/pxr --tag v0.2.0 --locked pxr-runtime-sim
 pxr demo
 ```
 
-Prebuilt Linux, Windows and macOS CLI/SDK packages are on the
-[releases page](https://github.com/ashutosh-rath02/pxr/releases). Verify the included
-SHA-256 checksums, extract the matching OS/architecture package, and run `pxr demo`.
-On Windows use `pxr.exe demo`. On macOS, unsigned downloads may require local
-Gatekeeper approval; building from source is also supported.
+The demo runs nine checked scenarios and prints JSON receipts. It exits with a
+failure code if any expected result changes. The reference profile exposes
+`motor.drive`, `motor.stop`, `gripper.open`, and `gripper.close`.
 
-The demo checks nine scenarios and emits JSON receipts: valid execution, bounds,
-staleness, missing authority, duplicates, preconditions, watchdog, epoch mismatch,
-and failed verification. Its exit code is nonzero if any expected result differs.
-`replay` uses an explicit virtual clock, so repeated traces produce identical output.
+| Scenario | Result |
+|---|---|
+| Valid command, lease, timing, and state | `EXECUTED`, with driver feedback |
+| Velocity exceeds the configured limit | `REJECTED_BOUND` |
+| Command misses its validity window | `REJECTED_STALE` |
+| Action ID is submitted again | `REJECTED_DUPLICATE` |
+| Local state blocks the operation | `REJECTED_PRECONDITION` |
+| Supervisor detects loss of progress | `WATCHDOG_TRIGGERED`, followed by fallback |
+
+[Prebuilt downloads](https://github.com/ashutosh-rath02/pxr/releases/tag/v0.2.0)
+include Linux x86-64, Windows x86-64, and macOS Apple Silicon CLI/SDK bundles.
+Check `SHA256SUMS` and the platform requirements on the release page before use.
+
+To explore traces and capabilities from a checkout:
 
 ```sh
-pxr capabilities
-pxr replay --audit examples/demo.pxr > audit.jsonl
-pxr frame
-pxr receipt-frame
-# Decode either printed hex frame:
-pxr inspect HEX
+git clone https://github.com/ashutosh-rath02/pxr.git
+cd pxr
+cargo run --release -p pxr-runtime-sim -- capabilities
+cargo run --release -p pxr-runtime-sim -- replay --audit examples/demo.pxr
 ```
 
-## What ships
+## Execution contract
 
-- Four simulated capabilities: `motor.drive`, `motor.stop`, `gripper.open`, `gripper.close`.
-- Static capability registration with integer parameter bounds and state predicates.
-- Exclusive resource leases with owner binding, narrower limits and replay-safe renewal.
-- Controller-domain deadlines, receive-relative TTL, and independent stream expiry.
-- Sequence fencing, bounded duplicate suppression, and boot-session checks.
-- Latched e-stop, local recovery, sensor freshness and watchdog supervision.
-- Driver feedback verification and fixed receipt history, including uncertain outcomes.
-- A 92-byte action codec and 140-byte receipt codec with authority and state context.
-- C APIs for encoding, configuration, capability discovery, state snapshots and receipts.
-- Working Rust/C embedding examples and freestanding Cortex-M/RISC-V firmware.
-- Fault tests, deterministic traces and reproducible host benchmarks.
+- **Authority:** exclusive resource leases bind a principal to capabilities and limits.
+- **Freshness:** controller-clock deadlines, receive-relative TTL, boot IDs, and state epochs.
+- **Replay handling:** action-ID history and per-lease sequence checks precede dispatch.
+- **Local supervision:** stream expiry, lease expiry, sensor freshness, and latched e-stop.
+- **Evidence:** receipts record decisions, requested parameters, driver observations, and authority context.
 
-No third-party Rust packages are required. There is no transport server, AI model,
-robotics framework, dynamic policy engine, or dashboard in this v0.
+The core uses fixed capacities: 16 capabilities, 8 resources, 32 replay entries,
+and 64 receipts. Action frames are 92 bytes; portable receipt frames are 140 bytes.
+Transport framing and authentication belong to the adapter.
 
-## Embed it
+## Embedding
 
-Rust: implement `Driver::{execute, observe, fallback}`, register a bounded capability
-table with `Runtime::new`, and call `tick` from the local supervisor. Authenticate
-and authorize principals before granting leases. Use a fresh boot ID each restart.
+Implement `Driver::execute`, `Driver::observe`, and `Driver::fallback`. Register
+the device's capabilities, grant authorized leases, submit actions, and service
+the supervisor independently of incoming traffic.
 
-C/C++: build `pxr-runtime-c-api`, include [pxr.h](include/pxr.h), and allocate context
-storage using the exported size/alignment. The [C example](examples/c-embedding/main.c)
-uses static memory and verifies the complete action-to-fallback path.
-The [Rust example](crates/runtime-core/examples/embedding.rs) shows the same lifecycle.
+| Interface | Starting point |
+|---|---|
+| Rust | [Runnable embedding example](crates/runtime-core/examples/embedding.rs) |
+| C / C++ | [Public header](include/pxr.h) and [linked C example](examples/c-embedding/main.c) |
+| Binary formats | [Action and receipt codecs](crates/runtime-codec/src) |
+| Bare metal | [Cortex-M and RISC-V firmware harness](ports/qemu) |
+
+```toml
+[dependencies]
+pxr-runtime-core = { git = "https://github.com/ashutosh-rath02/pxr", tag = "v0.2.0" }
+pxr-runtime-codec = { git = "https://github.com/ashutosh-rath02/pxr", tag = "v0.2.0" }
+```
 
 ```sh
+cargo run -p pxr-runtime-core --example embedding
 cargo build --release -p pxr-runtime-c-api
-# Linux C integration check:
-cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c-embedding/main.c \
-  target/release/libpxr_runtime_c_api.a -ldl -lpthread -lm -o target/c-embedding
-./target/c-embedding
-```
 
-For a bare-metal archive:
-
-```sh
+# Freestanding Cortex-M archive; RISC-V is also supported.
 rustup target add thumbv7em-none-eabihf
 cargo build --release -p pxr-runtime-c-api --no-default-features --target thumbv7em-none-eabihf
 ```
 
-The same crate builds for `riscv32imc-unknown-none-elf`. The
-[QEMU harness](ports/qemu/build.py) links and executes both ARM Cortex-M3 and
-RISC-V binaries with simulated drivers, recording flash sections and stack use.
-Physical ports supply a clock, trusted sensors, driver, fallback policy,
-supervisor scheduling and an independent hardware watchdog.
+Serialize access to each runtime. Callbacks must be bounded, synchronous, and
+non-reentrant. Use a fresh boot ID and one monotonic controller clock. Supply
+trusted sensor updates and an independent hardware watchdog. C callers allocate
+storage using `pxr_context_size()` and `pxr_context_align()`; inspect the receipt
+decision after `pxr_submit`, since a zero return indicates a receipt was produced.
 
-Serialize all access to one runtime. Callbacks must be bounded, synchronous and
-non-reentrant. Use monotonic controller milliseconds for every tick and deadline;
-the host's wall clock is a different time domain. Service the supervisor and fresh
-sensor updates independently of incoming commands. A hardware watchdog must handle
-loss of software progress.
+## Benchmarks
 
-`Executed` means the driver's immediate observation passed the configured checks.
-Define what that observation represents for your device. Replay protection is
-bounded and volatile; receipts are unsigned and the 64-entry ring overwrites its
-oldest entries. Export receipts regularly if you need durable history.
+### Controlled host comparison
 
-For C callers, `pxr_submit` returning zero means a receipt was produced; inspect
-its decision and reason. Re-query context size after upgrades. The v0.2 action
-format and existing C ABI 1 layouts remain compatible with v0.1; full receipt
-metadata is available through `pxr_receipt_frame`.
+The [comparison harness](crates/runtime-sim/examples/compare.rs) runs four paths
+against identical inputs and the same driver callbacks. The small guard implements
+one capability, bounds, sequencing, a time window, and local flags. PXR additionally
+enforces leases, boot/epoch checks, replay history, supervision, and receipts.
 
-## Development
+| Path | Median batch cost per action, range across five runs |
+|---|---:|
+| Direct driver + observation check | 19.7–21.9 ns |
+| Small handwritten guard + driver | 21.5–23.8 ns |
+| PXR with a typed action | 70.5–79.0 ns |
+| PXR with frame decoding and CRC | 583.3–661.6 ns |
+
+Measured on Windows 11 x86-64, Intel Core i7-1260P, Rust 1.98.1, release/LTO.
+Each run uses 200 batches of 1,024 actions per path after eight warmup batches.
+Execution order rotates; inputs and frames are prepared outside timed regions.
+Every dispatch count and final driver output is checked.
+
+These are batch averages with virtual controller time fixed at zero. They measure
+host processing cost; they do not establish individual-action tail latency, MCU
+worst-case timing, or a real control-loop rate. The guard has fewer guarantees.
+The frame path includes decoding and CRC verification, and excludes encoding and transport.
+
+[Raw samples, source hashes, and environment](docs/evidence/comparison.json)
 
 ```sh
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all --check
-cargo run -p pxr-runtime-core --example embedding
+# Python 3.11+; builds the harness and records five runs.
+python scripts/compare.py
+
+# Existing per-action host timing and fault demonstration:
+cargo run --release -p pxr-runtime-sim -- bench 20000
 ```
 
-To run both embedded firmware checks on a Linux host:
+### Embedded footprint
+
+Both test images execute under QEMU with the same `no_std` core and C ABI that ship
+in the SDK.
+
+| Test firmware | Linked code | C context | Observed stack use |
+|---|---:|---:|---:|
+| Cortex-M3 | 21,920 B | 11,128 B | 2,228 B |
+| RISC-V RV32IMC | 19,296 B | 11,128 B | 2,148 B |
+
+Code includes the C harness and startup support. The harness reserves 16 KiB for
+context storage and 32 KiB for stack; observed stack use covers the exercised paths.
+The Rust runtime alone occupies 11,120 bytes on the measured 64-bit host.
+[Raw firmware measurements](docs/evidence/qemu.json)
+
+### External evaluation targets
+
+| Target | Useful comparison |
+|---|---|
+| Handwritten firmware guard | Policy overhead, storage, and maintenance effort on the same board; host cost measured above |
+| [EdgeEmbed](https://edgeembed.com/docs/getting-started/) | Matched decision policies through its Linux C SDK; account for its different event model |
+| [Invariant](https://github.com/clay-good/invariant) | Overlapping command-validation rules; measure cryptographic verification and signed auditing separately |
+| [PX4 Offboard](https://docs.px4.io/main/en/flight_modes/offboard) | Controller-loss and fallback behavior under equivalent failure traces |
+
+External product comparisons have **not been measured**. A meaningful comparison
+needs the same host or board, policy, driver workload, and measurement boundaries.
+
+## Verification
+
+47 Rust tests cover admission, lease scope, replay, time/epoch checks, e-stop
+recovery, driver failures, and receipt encoding. Coverage includes randomized
+fault transitions and exhaustive single-bit corruption of action/receipt frames.
+CI runs on Linux, Windows, and macOS, checks Rust 1.85, links a C caller, and
+executes firmware on two emulated instruction sets.
 
 ```sh
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check
+
+# Linux host: execute both freestanding firmware images.
 sudo apt-get install clang lld llvm qemu-system-arm qemu-system-misc
 rustup target add thumbv7m-none-eabi riscv32imc-unknown-none-elf
 python3 ports/qemu/build.py
 ```
 
-Raw measurements are in [docs/evidence](docs/evidence); host timings are observed
-samples, and QEMU measurements cover emulated execution. Run
-`python3 scripts/measure.py target/release/pxr` to regenerate host evidence.
+## Deployment boundaries
 
-Contributions should preserve deterministic semantics and static memory. Include
-conformance tests for changes to authority, timing, replay or failure behavior.
+`Executed` means the driver's immediate observation passed the configured checks.
+Physical completion depends on the driver's observation contract. Replay state is
+volatile; receipts are unsigned and their ring buffer overwrites old entries.
+Device-specific constraints, authenticated ingress, physical protection, and
+measured scheduling budgets remain the integrator's responsibility.
+
+## Contributing
+
+Feedback from firmware and robotics developers is welcome, especially real-device
+ports, measured scheduling behavior, and comparisons with existing control code.
+Include a reproducer and target/toolchain details in [issues](https://github.com/ashutosh-rath02/pxr/issues).
 Report vulnerabilities through [private security reporting](https://github.com/ashutosh-rath02/pxr/security/advisories/new).
 
-MIT license. Created by Ashutosh Rath.
+[MIT license](LICENSE). Created by Ashutosh Rath.

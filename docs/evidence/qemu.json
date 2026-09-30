@@ -1,35 +1,32 @@
 {
-    "ci_run":  "https://github.com/ashutosh-rath02/pxr/actions/runs/36741849281",
-    "source_commit":  "63f7fcef68db111826193fc9e452ebaed25aab35",
-    "measurements":  {
-                         "value":  [
-                                       {
-                                           "target":  "thumbv7m-none-eabi",
-                                           "text_bytes":  21920,
-                                           "data_bytes":  0,
-                                           "bss_bytes":  16404,
-                                           "elf_bytes":  864716,
-                                           "hardware_validated":  false,
-                                           "context_bytes":  11128,
-                                           "stack_high_water_bytes":  2228,
-                                           "driver_executions":  2,
-                                           "fallbacks":  11,
-                                           "emulator":  "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)"
-                                       },
-                                       {
-                                           "target":  "riscv32imc-unknown-none-elf",
-                                           "text_bytes":  19296,
-                                           "data_bytes":  0,
-                                           "bss_bytes":  16404,
-                                           "elf_bytes":  692036,
-                                           "hardware_validated":  false,
-                                           "context_bytes":  11128,
-                                           "stack_high_water_bytes":  2148,
-                                           "driver_executions":  2,
-                                           "fallbacks":  11,
-                                           "emulator":  "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)"
-                                       }
-                                   ],
-                         "Count":  2
-                     }
+  "ci_run": "https://github.com/ashutosh-rath02/pxr/actions/runs/36741849281",
+  "source_commit": "63f7fcef68db111826193fc9e452ebaed25aab35",
+  "measurements": [
+    {
+      "target": "thumbv7m-none-eabi",
+      "text_bytes": 21920,
+      "data_bytes": 0,
+      "bss_bytes": 16404,
+      "elf_bytes": 864716,
+      "hardware_validated": false,
+      "context_bytes": 11128,
+      "stack_high_water_bytes": 2228,
+      "driver_executions": 2,
+      "fallbacks": 11,
+      "emulator": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)"
+    },
+    {
+      "target": "riscv32imc-unknown-none-elf",
+      "text_bytes": 19296,
+      "data_bytes": 0,
+      "bss_bytes": 16404,
+      "elf_bytes": 692036,
+      "hardware_validated": false,
+      "context_bytes": 11128,
+      "stack_high_water_bytes": 2148,
+      "driver_executions": 2,
+      "fallbacks": 11,
+      "emulator": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)"
+    }
+  ]
 }
