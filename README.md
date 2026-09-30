@@ -32,6 +32,12 @@ cargo install --git https://github.com/ashutosh-rath02/pxr --tag v0.1.0 pxr-runt
 pxr demo
 ```
 
+Prebuilt Linux, Windows and macOS CLI packages are on the
+[releases page](https://github.com/ashutosh-rath02/pxr/releases). Verify the included
+SHA-256 checksums, extract the matching OS/architecture package, and run `pxr demo`.
+On Windows use `pxr.exe demo`. On macOS, unsigned downloads may require local
+Gatekeeper approval; building from source is also supported.
+
 The demo checks nine scenarios and emits JSON receipts: valid execution, bounds,
 staleness, missing authority, duplicates, preconditions, watchdog, epoch mismatch,
 and failed verification. Its exit code is nonzero if any expected result differs.
@@ -93,6 +99,7 @@ fallback policy, supervisor scheduling and an independent hardware watchdog.
 | [Test plan](V0_TEST_PLAN.md) | Required cases and verification commands |
 | [Research](RESEARCH.md) | Feasibility, overlaps and product direction |
 | [Benchmarks](docs/BENCHMARKS.md) | Measured evidence and unmeasured targets |
+| [Validation](docs/VALIDATION.md) | Passing tests, CI and C integration evidence |
 | [Roadmap](ROADMAP.md) | Work needed beyond the v0 simulation release |
 
 ```sh
