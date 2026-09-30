@@ -1,0 +1,19 @@
+[package]
+name = "pxr-runtime-sim"
+description = "Deterministic PXR simulator, conformance runner and benchmark CLI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pxr"
+path = "src/main.rs"
+
+[dependencies]
+pxr-runtime-core = { path = "../runtime-core", version = "0.1.0" }
+pxr-runtime-codec = { path = "../runtime-codec", version = "0.1.0" }
+
+[lints]
+workspace = true

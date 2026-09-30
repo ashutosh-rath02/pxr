@@ -1,0 +1,22 @@
+[package]
+name = "pxr-runtime-c-api"
+description = "Caller-allocated C ABI for PXR"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+pxr-runtime-core = { path = "../runtime-core", version = "0.1.0" }
+pxr-runtime-codec = { path = "../runtime-codec", version = "0.1.0" }
+
+[lints]
+workspace = true
