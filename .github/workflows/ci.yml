@@ -80,3 +80,45 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: rustup toolchain install 1.85.0 --profile minimal
       - run: cargo +1.85.0 test --workspace --locked
+  playground:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - run: rustup target add wasm32-unknown-unknown
+      - run: python scripts/build_playground.py
+      - run: node --test scripts/verify_playground.mjs
+      - run: npm ci
+        working-directory: web/tests
+      - run: npx playwright install --with-deps chromium
+        working-directory: web/tests
+      - run: npm test
+        working-directory: web/tests
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: playground-browser-results
+          path: web/tests/test-results/
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: dist/playground
+  deploy-playground:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [host, embedded, emulated-firmware, msrv, playground]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy verified playground
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

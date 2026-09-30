@@ -12,7 +12,7 @@ the local controller invokes its configured fallback.
 
 **Rust `no_std` · Fixed memory · C/C++ interface · No external Rust dependencies**
 
-[Quickstart](#quickstart) · [Embedding](#embedding) · [Benchmarks](#benchmarks) · [Downloads](https://github.com/ashutosh-rath02/pxr/releases/tag/v0.2.0)
+[Try in your browser](https://ashutosh-rath02.github.io/pxr/) · [Quickstart](#quickstart) · [Embedding](#embedding) · [Benchmarks](#benchmarks) · [Downloads](https://github.com/ashutosh-rath02/pxr/releases/tag/v0.2.0)
 
 ```text
 Planner → authenticated adapter → PXR → device driver → actuator
@@ -28,6 +28,11 @@ The application supplies the transport, authenticated identity, sensors, and dri
 Physical board timing and actuator behavior require device-specific validation.
 
 ## Quickstart
+
+**[Open the interactive playground](https://ashutosh-rath02.github.io/pxr/)** to try
+nine scenarios without installing anything. It compiles the actual Rust runtime
+to WebAssembly: change command parameters, trigger failures, inspect receipts,
+and export the results as JSON. All device behavior and time are simulated.
 
 With [Rust 1.85 or newer](https://www.rust-lang.org/tools/install):
 
@@ -61,6 +66,24 @@ cd pxr
 cargo run --release -p pxr-runtime-sim -- capabilities
 cargo run --release -p pxr-runtime-sim -- replay --audit examples/demo.pxr
 ```
+
+### Build the browser playground
+
+The [browser adapter](crates/playground/src/lib.rs) calls the same core and
+simulated driver as the native examples. It uses `std` and heap storage for the
+browser interface; the embedded core keeps its fixed-memory `no_std` contract.
+The [static frontend](web) needs no bundler, backend, account, or analytics service.
+
+```sh
+rustup target add wasm32-unknown-unknown
+python scripts/build_playground.py
+node --test scripts/verify_playground.mjs
+python -m http.server 8080 --bind 127.0.0.1 --directory dist/playground
+```
+
+Open `http://127.0.0.1:8080`. Building requires Python 3.11+; the WASM checks use
+Node.js 22+. Share a scenario with a URL such as
+[`?scenario=stream`](https://ashutosh-rath02.github.io/pxr/?scenario=stream).
 
 ## Execution contract
 
@@ -173,11 +196,14 @@ needs the same host or board, policy, driver workload, and measurement boundarie
 
 ## Verification
 
-47 Rust tests cover admission, lease scope, replay, time/epoch checks, e-stop
+47 core/codec/conformance tests cover admission, lease scope, replay, time/epoch checks, e-stop
 recovery, driver failures, and receipt encoding. Coverage includes randomized
 fault transitions and exhaustive single-bit corruption of action/receipt frames.
 CI runs on Linux, Windows, and macOS, checks Rust 1.85, links a C caller, and
-executes firmware on two emulated instruction sets.
+executes firmware on two emulated instruction sets. The playground adds four Rust
+adapter tests, 14 checks against the compiled WebAssembly, and eight browser tests
+covering desktop/mobile interaction, receipt export, and runtime-loading failures.
+GitHub Pages deploys only after the full CI suite passes.
 
 ```sh
 cargo test --workspace --locked

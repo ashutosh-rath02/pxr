@@ -1,0 +1,19 @@
+[package]
+name = "pxr-playground"
+description = "WebAssembly adapter for the PXR browser playground"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pxr-runtime-core = { path = "../runtime-core", version = "0.2.0" }
+pxr-runtime-sim = { path = "../runtime-sim", version = "0.2.0" }
+
+[lints]
+workspace = true

@@ -5,6 +5,9 @@
 __pycache__/
 /artifact-manifest.json
 /benchmark.json
+node_modules/
+/web/tests/test-results/
+/web/tests/playwright-report/
 .env
 .env.*
 !.env.example

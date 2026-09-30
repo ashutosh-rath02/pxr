@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/runtime-core", "crates/runtime-codec", "crates/runtime-c-api", "crates/runtime-sim"]
+members = ["crates/runtime-core", "crates/runtime-codec", "crates/runtime-c-api", "crates/runtime-sim", "crates/playground"]
 resolver = "2"
 
 [workspace.package]

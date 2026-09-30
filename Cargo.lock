@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "pxr-playground"
+version = "0.2.0"
+dependencies = [
+ "pxr-runtime-core",
+ "pxr-runtime-sim",
+]
+
+[[package]]
 name = "pxr-runtime-c-api"
 version = "0.2.0"
 dependencies = [
