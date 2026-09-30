@@ -33,7 +33,7 @@ final = json.loads(trace.splitlines()[-1])
 assert final["final_state"] == "SafeIdle" and final["velocity"] == [0, 0]
 assert final["driver_executions"] == 3
 
-# Built independently from ACTION_ABI.md, not the Rust codec.
+# Independent reference for the fixed action ABI v1 layout.
 body = struct.pack("<4sBBHHH8QI2i", b"PXR0", 1, 0, 92, 1, 0,
                    42, 7, 1, 99, 99, 2, 0, 20, 100, 400, -200)
 frame = body + struct.pack("<I", zlib.crc32(body))

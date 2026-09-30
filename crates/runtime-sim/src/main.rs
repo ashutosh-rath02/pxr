@@ -406,7 +406,7 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         None | Some("--help") | Some("help") => {
-            println!("PXR — deterministic physical execution runtime\n\n  pxr demo             Run nine checked failure scenarios (JSONL)\n  pxr bench [count]    Measure admission, duplicate and direct driver paths (JSON)\n  pxr replay FILE      Run a deterministic .pxr trace (JSONL)\n  pxr replay --audit FILE  Include lease and fallback receipts\n  pxr capabilities     Print static capability descriptors\n  pxr inspect HEX      Decode an action or receipt frame\n  pxr receipt-frame    Print a reference receipt frame as hex\n  pxr frame            Print a reference action frame as hex\n\nSimulation / research release. See SAFETY_MODEL.md for integration obligations.");
+            println!("PXR — deterministic physical execution runtime\n\n  pxr demo             Run nine checked failure scenarios (JSONL)\n  pxr bench [count]    Measure admission, duplicate and direct driver paths (JSON)\n  pxr replay FILE      Run a deterministic .pxr trace (JSONL)\n  pxr replay --audit FILE  Include lease and fallback receipts\n  pxr capabilities     Print static capability descriptors\n  pxr inspect HEX      Decode an action or receipt frame\n  pxr receipt-frame    Print a reference receipt frame as hex\n  pxr frame            Print a reference action frame as hex\n\nSimulation / research release. See README.md for integration requirements.");
             Ok(())
         }
         _ => Err("unknown command; run pxr --help".into()),

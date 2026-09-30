@@ -6,7 +6,6 @@ actuators. Rust `no_std` core, fixed memory, transport-independent semantics, C 
 **v0.2 is an experimental SDK release.** It includes a simulator, C and Rust embedding
 examples, and bare-metal firmware tested on Cortex-M and RISC-V under QEMU.
 Physical safety and board timing require device-specific validation.
-See [the safety model](SAFETY_MODEL.md).
 
 ```text
 AI / planner -> trusted adapter -> PXR -> existing driver -> actuator
@@ -79,7 +78,7 @@ and authorize principals before granting leases. Use a fresh boot ID each restar
 C/C++: build `pxr-runtime-c-api`, include [pxr.h](include/pxr.h), and allocate context
 storage using the exported size/alignment. The [C example](examples/c-embedding/main.c)
 uses static memory and verifies the complete action-to-fallback path.
-Follow the [integration guide](docs/INTEGRATION.md) for the full lifecycle and upgrade notes.
+The [Rust example](crates/runtime-core/examples/embedding.rs) shows the same lifecycle.
 
 ```sh
 cargo build --release -p pxr-runtime-c-api
@@ -97,35 +96,50 @@ cargo build --release -p pxr-runtime-c-api --no-default-features --target thumbv
 ```
 
 The same crate builds for `riscv32imc-unknown-none-elf`. The
-[QEMU firmware](ports/qemu/README.md) links and executes both ARM Cortex-M3 and
+[QEMU harness](ports/qemu/build.py) links and executes both ARM Cortex-M3 and
 RISC-V binaries with simulated drivers, recording flash sections and stack use.
 Physical ports supply a clock, trusted sensors, driver, fallback policy,
 supervisor scheduling and an independent hardware watchdog.
 
-## Contracts and evidence
+Serialize all access to one runtime. Callbacks must be bounded, synchronous and
+non-reentrant. Use monotonic controller milliseconds for every tick and deadline;
+the host's wall clock is a different time domain. Service the supervisor and fresh
+sensor updates independently of incoming commands. A hardware watchdog must handle
+loss of software progress.
 
-| Document | Read it for |
-|---|---|
-| [Architecture](ARCHITECTURE.md) | Ownership, bounded memory and embedding obligations |
-| [Action and receipt ABI](ACTION_ABI.md) | Byte offsets, time domains, replay and receipts |
-| [Integration guide](docs/INTEGRATION.md) | Rust/C lifecycle, discovery, audit export and upgrades |
-| [QEMU firmware](ports/qemu/README.md) | Executable embedded examples and stack measurements |
-| [Capability model](CAPABILITY_MODEL.md) | Profiles, authority and execution classes |
-| [Safety model](SAFETY_MODEL.md) | Failure behavior and guarantee boundaries |
-| [State machine](RUNTIME_STATE_MACHINE.md) | Epochs, faults, e-stop and recovery |
-| [Test plan](V0_TEST_PLAN.md) | Required cases and verification commands |
-| [Research](RESEARCH.md) | Feasibility, overlaps and product direction |
-| [Benchmarks](docs/BENCHMARKS.md) | Measured evidence and unmeasured targets |
-| [Validation](docs/VALIDATION.md) | Passing tests, CI and C integration evidence |
-| [Roadmap](ROADMAP.md) | Completed software scope and physical validation gates |
+`Executed` means the driver's immediate observation passed the configured checks.
+Define what that observation represents for your device. Replay protection is
+bounded and volatile; receipts are unsigned and the 64-entry ring overwrites its
+oldest entries. Export receipts regularly if you need durable history.
+
+For C callers, `pxr_submit` returning zero means a receipt was produced; inspect
+its decision and reason. Re-query context size after upgrades. The v0.2 action
+format and existing C ABI 1 layouts remain compatible with v0.1; full receipt
+metadata is available through `pxr_receipt_frame`.
+
+## Development
 
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
+cargo run -p pxr-runtime-core --example embedding
 ```
 
-The public API and ABI are versioned but still experimental. Contributions should
-preserve deterministic semantics and static memory. See [CONTRIBUTING.md](CONTRIBUTING.md).
+To run both embedded firmware checks on a Linux host:
+
+```sh
+sudo apt-get install clang lld llvm qemu-system-arm qemu-system-misc
+rustup target add thumbv7m-none-eabi riscv32imc-unknown-none-elf
+python3 ports/qemu/build.py
+```
+
+Raw measurements are in [docs/evidence](docs/evidence); host timings are observed
+samples, and QEMU measurements cover emulated execution. Run
+`python3 scripts/measure.py target/release/pxr` to regenerate host evidence.
+
+Contributions should preserve deterministic semantics and static memory. Include
+conformance tests for changes to authority, timing, replay or failure behavior.
+Report vulnerabilities through [private security reporting](https://github.com/ashutosh-rath02/pxr/security/advisories/new).
 
 MIT license. Created by Ashutosh Rath.
