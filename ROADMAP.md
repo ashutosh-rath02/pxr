@@ -1,28 +1,37 @@
 # Roadmap
 
-## This release
+## Delivered in v0.2
 
-The revised PRD's M0 contracts and v0 simulated motor/gripper execution runtime:
-static capabilities, leases, bounds, timing, state, replay, watchdogs, fallback,
-feedback verification, receipts, binary codec, C embedding and measurements.
+The revised PRD's M0 contracts and complete v0 software scope: static capabilities,
+leases, bounds, time/state validation, replay protection, watchdogs, fallbacks,
+feedback verification, receipts, binary codecs and motor/gripper simulation.
 
-## Next evidence gate
+The embedding SDK adds Rust/C examples, configurable limits, capability discovery,
+state snapshots, portable audit records, a trace CLI, public host/embedded packages
+and CI provenance. Cortex-M and RISC-V firmware executes under QEMU; linked code
+and observed stack use are measured.
 
-1. Integrate one real controller with a board-specific clock, authenticated ingress,
-   sensor source, driver, fallback and independent watchdog.
-2. Measure linked flash, static RAM, stack use, callback WCET and physical stop behavior.
-3. Run the same fault matrix against a minimal direct-control wrapper.
-4. Repeat on a second MCU family without changing the core semantics.
-5. Ask embedded integrators whether the contract saves maintenance work.
+## Next evidence gate: physical controller
 
-## Later, only if that gate passes
+1. Integrate a board-specific clock, authenticated ingress, trusted sensor source,
+   actuator driver, fallback and independent watchdog.
+2. Measure callback WCET, scheduling/interrupt interference, board memory and
+   physical stop behavior using the published fault matrix.
+3. Compare against a minimal direct-control wrapper on the same board.
+4. Repeat on a second MCU family without changing core semantics.
+5. Obtain embedded integrator feedback on the contract and maintenance costs.
 
-- Asynchronous driver completion, measured tolerances and long-running action cancellation.
-- Authenticated delegation adapters and durable evidence export.
-- Explicit epoch revalidation policies for independent resources.
-- Bounded scheduling and priority admission when a demonstrated workload needs it.
-- ROS 2, Zenoh, CAN, MCP or emerging physical-AI adapters.
-- Formal analysis of the state machine and platform-specific assurance work.
+These steps need physical hardware and device-specific requirements. Emulation
+does not establish their results.
 
-No claim of hardware certification, universal safe fallback, or global exactly-once
-physical execution is made or planned as an unsupported marketing promise.
+## Later, when a measured workload needs it
+
+- Asynchronous driver completion, observation tolerances and long-running cancellation.
+- Authenticated delegation adapters and durable evidence storage.
+- Epoch revalidation policies for independent resources.
+- Bounded scheduling and priority admission.
+- ROS 2, Zenoh, CAN, MCP or other ecosystem adapters.
+- Formal state-machine analysis and platform-specific assurance work.
+
+The scope stays focused on execution semantics. Planning, models, networking
+infrastructure and a dashboard remain outside the core.

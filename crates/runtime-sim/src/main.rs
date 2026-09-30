@@ -4,8 +4,32 @@ use pxr_runtime_sim::*;
 use std::{env, hint::black_box, process::ExitCode, time::Instant};
 
 fn label(r: Receipt) -> &'static str {
-    if r.decision == Decision::Executed {
-        return "EXECUTED";
+    match r.decision {
+        Decision::Executed => return "EXECUTED",
+        Decision::Control => {
+            return match r.reason {
+                Reason::LeaseGranted => "LEASE_GRANTED",
+                Reason::LeaseRenewed => "LEASE_RENEWED",
+                Reason::Recovered => "RECOVERED",
+                _ => "CONTROL_APPLIED",
+            }
+        }
+        Decision::Fallback => {
+            return match r.reason {
+                Reason::Watchdog => "WATCHDOG_TRIGGERED",
+                Reason::StreamExpired => "STREAM_EXPIRED",
+                Reason::Estop => "ESTOP_ACTIVE",
+                _ => "FALLBACK_TRIGGERED",
+            }
+        }
+        Decision::Failed => {
+            return if r.reason == Reason::Verification {
+                "VERIFICATION_FAILED"
+            } else {
+                "EXECUTION_FAILED"
+            }
+        }
+        Decision::Rejected => {}
     }
     match r.reason {
         Reason::Bound => "REJECTED_BOUND",
@@ -13,11 +37,8 @@ fn label(r: Receipt) -> &'static str {
         Reason::Authority | Reason::LeaseExpired => "REJECTED_AUTHORITY",
         Reason::Duplicate | Reason::OldSequence => "REJECTED_DUPLICATE",
         Reason::Precondition => "REJECTED_PRECONDITION",
-        Reason::Watchdog => "WATCHDOG_TRIGGERED",
-        Reason::StreamExpired => "STREAM_EXPIRED",
         Reason::Epoch => "REJECTED_EPOCH",
         Reason::Estop => "ESTOP_ACTIVE",
-        Reason::Verification => "VERIFICATION_FAILED",
         _ => "REJECTED",
     }
 }

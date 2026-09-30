@@ -17,6 +17,7 @@ jobs:
       - run: cargo +stable fmt --all --check
       - run: cargo +stable clippy --workspace --all-targets -- -D warnings
       - run: cargo +stable test --workspace --locked
+      - run: cargo +stable run --locked -p pxr-runtime-core --example embedding
       - run: cargo +stable build --workspace --release --locked
       - if: runner.os != 'Windows'
         run: python3 scripts/verify_cli.py target/release/pxr
@@ -64,10 +65,13 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang lld llvm qemu-system-arm qemu-system-misc
       - run: rustup target add thumbv7m-none-eabi riscv32imc-unknown-none-elf
       - run: python3 ports/qemu/build.py
+      - run: python3 scripts/artifact_manifest.py emulated-firmware
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: emulated-firmware
-          path: target/qemu/
+          path: |
+            target/qemu/
+            artifact-manifest.json
   msrv:
     runs-on: ubuntu-latest
     steps:

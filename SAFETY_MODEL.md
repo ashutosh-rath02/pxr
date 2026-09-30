@@ -1,6 +1,6 @@
 # Safety and security model
 
-PXR v0.1 is an experimental execution boundary tested in simulation. It is not a
+PXR v0.2 is an experimental execution boundary tested in simulation and QEMU. It is not a
 safety-certified controller, authenticated network service, or hardware attestation
 system. The runtime enforces the configured contract; that contract does not prove
 that a robot or machine is safe in all physical situations.

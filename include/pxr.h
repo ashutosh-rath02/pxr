@@ -23,6 +23,46 @@ extern "C" {
 #define PXR_CONTROL 3
 #define PXR_FAILED 4
 
+#define PXR_STATE_IDLE 0
+#define PXR_STATE_ARMED 1
+#define PXR_STATE_FAULTED 2
+#define PXR_STATE_ESTOPPED 3
+#define PXR_CLASS_STREAM 0
+#define PXR_CLASS_DISCRETE 1
+#define PXR_CLASS_CONTROL 2
+#define PXR_VERIFY_PARAMETERS 0
+#define PXR_VERIFY_STATE 1
+
+/* Fixed reason values used in receipts and positive API error returns. */
+#define PXR_REASON_OK 0
+#define PXR_REASON_BOUND 1
+#define PXR_REASON_STALE 2
+#define PXR_REASON_AUTHORITY 3
+#define PXR_REASON_DUPLICATE 4
+#define PXR_REASON_PRECONDITION 5
+#define PXR_REASON_OLD_SEQUENCE 6
+#define PXR_REASON_EPOCH 7
+#define PXR_REASON_UNKNOWN_CAPABILITY 8
+#define PXR_REASON_TOO_EARLY 9
+#define PXR_REASON_INVALID 10
+#define PXR_REASON_ESTOP 11
+#define PXR_REASON_FAULTED 12
+#define PXR_REASON_WATCHDOG 13
+#define PXR_REASON_LEASE_EXPIRED 14
+#define PXR_REASON_STREAM_EXPIRED 15
+#define PXR_REASON_DRIVER 16
+#define PXR_REASON_VERIFICATION 17
+#define PXR_REASON_CLOCK 18
+#define PXR_REASON_BUSY 19
+#define PXR_REASON_CANCELED 20
+#define PXR_REASON_INVALID_STORM 21
+#define PXR_REASON_STATE_STALE 22
+#define PXR_REASON_BOOT_MISMATCH 23
+#define PXR_REASON_LEASE_GRANTED 24
+#define PXR_REASON_LEASE_RENEWED 25
+#define PXR_REASON_RECOVERED 26
+#define PXR_REASON_STARTUP 27
+
 typedef struct { int32_t parameters[2]; uint32_t state; } pxr_observation;
 typedef struct {
     void *user;
@@ -67,7 +107,7 @@ typedef struct {
 } pxr_snapshot_record;
 
 /* Errors: -1 invalid pointer/size, -2 invalid frame, -3 invalid configuration or
- * startup fallback failure, -4 no retained receipt. Positive errors are Reason IDs.
+ * startup fallback failure, -4 no receipt/capability at index. Positive errors are Reason IDs.
  * No C ABI can validate dangling pointers, buffer lengths or concurrent access.
  * Failed init leaves storage uninitialized: do not call other functions on it.
  */

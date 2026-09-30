@@ -49,11 +49,18 @@ assert struct.unpack_from("<QQ",receipt,8)==(42,7)
 assert struct.unpack_from("<Q",receipt,32)[0]==2
 assert struct.unpack_from("<ii",receipt,112)==(400,-200)
 assert json.loads(run("inspect",receipt.hex()))["decision"]=="Executed"
+# Construct every receipt field independently, including reserved bytes and flags.
+receipt_body = struct.pack("<4sBBHQQII9Q4iIIHH4B", b"PXRR",1,0,140,42,7,0,0,
+                           2,99,99,1,2,0,0,0,0,400,-200,400,-200,0,0,1,0,0,0,1,1)
+assert receipt == receipt_body + struct.pack("<I",zlib.crc32(receipt_body))
 caps=[json.loads(line) for line in run("capabilities").splitlines()]
 assert [c["id"] for c in caps]==[1,2,3,4]
 audit=[json.loads(line) for line in run("replay","--audit","examples/demo.pxr").splitlines()]
 assert [r["receipt_id"] for r in audit[:-1]]==list(range(1,len(audit)))
 assert any(r.get("reason")=="StreamExpired" for r in audit)
+assert all(r["status"] == "LEASE_GRANTED" for r in audit[:-1] if r["reason"] == "LeaseGranted")
+assert all(r["status"] == "STREAM_EXPIRED" for r in audit[:-1] if r["reason"] == "StreamExpired")
+assert run("replay","--audit","examples/demo.pxr") == run("replay","--audit","examples/demo.pxr")
 
 for args in [("missing-command",), ("bench", "0"), ("replay", "missing-file.pxr")]:
     result = subprocess.run([str(binary), *args], capture_output=True, cwd=ROOT)

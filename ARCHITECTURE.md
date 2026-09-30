@@ -1,6 +1,6 @@
-# PXR v0.1 architecture
+# PXR v0.2 architecture
 
-Status: version 1 contracts implemented for simulation and embedded cross-compilation.
+Status: version 1 contracts implemented for simulation and execution on emulated MCUs.
 Hardware deployment and timing certification are outside this release's evidence.
 
 ## Boundary
@@ -33,7 +33,7 @@ Independent hardware watchdog -----------> physical safe-state mechanism
 | Crate | Responsibility | Dependencies |
 |---|---|---|
 | `pxr-runtime-core` | Capabilities, leases, state, policy, replay, supervision, receipts | None, `no_std` |
-| `pxr-runtime-codec` | Fixed 92-byte action envelope and CRC | Core, `no_std` |
+| `pxr-runtime-codec` | Fixed 92-byte actions, 140-byte receipts and CRC | Core, `no_std` |
 | `pxr-runtime-c-api` | Caller-owned storage, validated C representations, driver callbacks | Core + codec; optional host `std` |
 | `pxr-runtime-sim` | Virtual clock, simulated driver, executable demonstrations, trace runner, benchmarks | Core + codec + standard library |
 
@@ -45,7 +45,12 @@ for each struct. Public modules can split later without changing action semantic
 16 registered capabilities, 8 resources, at most 1 lease and active action per
 resource, 32 recently dispatched action IDs, 64 receipts. Parameter vectors have
 two signed 32-bit integer slots. There are **zero queued actions**. Every iteration
-is bounded by these constants, or by the constant 92-byte frame size.
+is bounded by these constants, or by the constant action/receipt frame sizes.
+
+On the measured 64-bit host, the runtime occupies 11,120 bytes, including the
+8,192-byte receipt ring. The C context occupies 11,152 bytes on that host and
+11,128 bytes on the emulated 32-bit targets. Use `pxr_context_size/align` on the
+actual target. Stack and platform state are separate; see [measurements](docs/BENCHMARKS.md).
 
 The caller serializes all runtime access. Rust requires exclusive mutable access;
 the C caller must provide equivalent exclusion. IRQs and transport tasks post
@@ -80,5 +85,6 @@ an independent hardware watchdog. Embedded panic behavior is a spin loop; the
 hardware watchdog must handle loss of software progress. No `unsafe` code exists
 in core or codec; C pointer handling is confined to the ABI crate.
 
-Build without `std` on two instruction sets before adding any platform adapter.
-Cross-compilation is portability evidence, not a board or RTOS qualification.
+The `no_std` C ABI is cross-built for Cortex-M4F and RISC-V. The freestanding
+[firmware harness](ports/qemu/README.md) executes on Cortex-M3 and RISC-V under
+QEMU. Board peripherals, RTOS integration and physical timing require separate evidence.

@@ -1,5 +1,6 @@
 """Capture reproducible host measurements; no third-party Python packages."""
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import platform
 import shutil
@@ -12,7 +13,8 @@ rustc = shutil.which("rustc") or str(Path.home() / ".cargo/bin/rustc.exe")
 output = root / "docs/evidence"
 output.mkdir(parents=True, exist_ok=True)
 report = {
-    "date": "2026-09-30",
+    "date": datetime.now(timezone.utc).date().isoformat(),
+    "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
     "toolchain": subprocess.check_output([rustc, "--version"], text=True).strip(),
     "platform": platform.platform(),
     "processor": platform.processor(),

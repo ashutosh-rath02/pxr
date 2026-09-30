@@ -1,83 +1,126 @@
-"""Package verified CI binaries and embedded archives. Run from a clean release checkout."""
+"""Download, verify and package one successful CI run from an exact clean checkout.
+
+Requires Python 3.11+ and an authenticated gh CLI. No local build output is used.
+"""
+import argparse
 import hashlib
 import io
 import json
-import argparse
 from pathlib import Path
 import subprocess
 import tarfile
-import zipfile
+import tempfile
 import tomllib
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-DIST = ROOT / "dist"
-DIST.mkdir(exist_ok=True)
-parser = argparse.ArgumentParser()
-parser.add_argument("--ci-run", required=True, help="Passing CI run that produced the downloaded host artifacts")
-args = parser.parse_args()
-VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
-commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT):
-    raise SystemExit("Commit all release changes before packaging")
-run = json.loads(subprocess.check_output(["gh", "run", "view", args.ci_run,
-    "--json", "headSha,conclusion"], cwd=ROOT, text=True))
-if run["conclusion"] != "success":
-    raise SystemExit("The source CI run must have passed")
-if subprocess.check_output(["git", "diff", run["headSha"], "HEAD", "--", "crates", "include", "Cargo.toml", "Cargo.lock"], cwd=ROOT):
-    raise SystemExit("Runtime source differs from the CI binaries; rebuild and download fresh artifacts")
-common = [(p, p.relative_to(ROOT).as_posix()) for p in ROOT.glob("*.md")]
-common += [(ROOT / "LICENSE", "LICENSE"), (ROOT / "include/pxr.h", "include/pxr.h"),
-           (ROOT / "examples/demo.pxr", "examples/demo.pxr")]
-common += [(p, p.relative_to(ROOT).as_posix()) for p in (ROOT / "docs").glob("*.md")]
-common += [(p, p.relative_to(ROOT).as_posix()) for p in (ROOT / "docs/evidence").glob("*") if p.is_file()]
 
 
-def pack(name, files, metadata, windows=False):
-    suffix = ".zip" if windows else ".tar.gz"
-    destination = DIST / (name + suffix)
+def command(*args):
+    return subprocess.check_output(args, cwd=ROOT, text=True).strip()
+
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def validate_artifact(base, kind, commit, run_id, version):
+    manifest = json.loads((base / "artifact-manifest.json").read_text())
+    expected = {"kind": kind, "commit": commit, "run_id": run_id, "version": version}
+    if any(manifest.get(key) != value for key, value in expected.items()):
+        raise ValueError(f"Artifact provenance mismatch: {base.name}")
+    if not manifest["files"]:
+        raise ValueError(f"Empty artifact: {base.name}")
+    files = {}
+    for name, expected_digest in manifest["files"].items():
+        path = (base / name).resolve()
+        if not path.is_relative_to(base.resolve()) or not path.is_file():
+            raise ValueError(f"Invalid artifact path: {name}")
+        if digest(path) != expected_digest:
+            raise ValueError(f"Artifact checksum mismatch: {name}")
+        files[name] = path
+    return manifest, files
+
+
+def pack(destination, files, metadata):
+    metadata = {**metadata, "packaged_files": {name: digest(path) for path, name in files}}
     extra = json.dumps(metadata, indent=2).encode() + b"\n"
-    if windows:
-        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as z:
-            for path, arc in files + common:
-                z.write(path, arc)
-            z.writestr("BUILD.json", extra)
+    if destination.suffix == ".zip":
+        with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path, name in files:
+                archive.write(path, name)
+            archive.writestr("BUILD.json", extra)
     else:
-        with tarfile.open(destination, "w:gz") as tar:
-            for path, arc in files + common:
-                info = tar.gettarinfo(str(path), arcname=arc)
+        with tarfile.open(destination, "w:gz") as archive:
+            for path, name in files:
+                info = archive.gettarinfo(str(path), arcname=name)
                 info.uid = info.gid = 0
                 info.uname = info.gname = ""
-                info.mode = 0o755 if arc == "pxr" else 0o644
-                with path.open("rb") as f:
-                    tar.addfile(info, f)
+                info.mode = 0o755 if name == "pxr" else 0o644
+                with path.open("rb") as stream:
+                    archive.addfile(info, stream)
             info = tarfile.TarInfo("BUILD.json")
             info.size = len(extra)
             info.mode = 0o644
-            tar.addfile(info, io.BytesIO(extra))
-    return destination
+            archive.addfile(info, io.BytesIO(extra))
 
 
-bundles = []
-for host in ("linux", "macos", "windows"):
-    base = ROOT / ".tools" / ("ci-" + host)
-    benchmark = json.loads((base / "benchmark.json").read_text(encoding="utf-8-sig"))
-    exe = "pxr.exe" if host == "windows" else "pxr"
-    binary = base / "target/release" / exe
-    metadata = {"version": VERSION, "package_commit": commit,
-                "binary_source_commit": run["headSha"],
-                "ci_run": args.ci_run, "host": host, "architecture": benchmark["architecture"]}
-    bundles.append(pack(f"pxr-{VERSION}-{host}-{benchmark['architecture']}",
-                        [(binary, exe), (base / "benchmark.json", "ci-benchmark.json")],
-                        metadata, host == "windows"))
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ci-run", required=True, type=int)
+    args = parser.parse_args()
+    run_id = str(args.ci_run)
+    version = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
+    commit = command("git", "rev-parse", "HEAD")
+    if command("git", "status", "--porcelain"):
+        raise SystemExit("Commit all release changes before packaging")
+    run = json.loads(command("gh", "run", "view", run_id,
+                             "--json", "headSha,conclusion,status,workflowName,url"))
+    if (run["status"], run["conclusion"], run["workflowName"], run["headSha"]) != (
+            "completed", "success", "CI", commit):
+        raise SystemExit("Packaging requires a successful CI run for exactly HEAD")
+    cache = ROOT / ".tools/release-ci"
+    cache.mkdir(parents=True, exist_ok=True)
+    download = Path(tempfile.mkdtemp(prefix=f"{run_id}-", dir=cache))
+    subprocess.run(["gh", "run", "download", run_id, "--dir", str(download)], cwd=ROOT, check=True)
+    dist = ROOT / "dist" / f"v{version}"
+    dist.mkdir(parents=True, exist_ok=True)
+    common_paths = list(ROOT.glob("*.md")) + [ROOT / "LICENSE", ROOT / "include/pxr.h"]
+    for directory in ("docs", "examples", "ports/qemu"):
+        common_paths.extend(p for p in (ROOT / directory).rglob("*") if p.is_file() and "__pycache__" not in p.parts)
+    common_paths.append(ROOT / "crates/runtime-core/examples/embedding.rs")
+    common = [(path, path.relative_to(ROOT).as_posix()) for path in sorted(common_paths)]
+    bundles = []
+    for host in ("ubuntu", "macos", "windows"):
+        base = download / f"host-{host}-latest"
+        manifest, files = validate_artifact(base, "host", commit, run_id, version)
+        benchmark = json.loads(files["benchmark.json"].read_text(encoding="utf-8-sig"))
+        exe = "pxr.exe" if host == "windows" else "pxr"
+        lib = "pxr_runtime_c_api.lib" if host == "windows" else "libpxr_runtime_c_api.a"
+        os_name = "linux" if host == "ubuntu" else host
+        suffix = "zip" if host == "windows" else "tar.gz"
+        path = dist / f"pxr-{version}-{os_name}-{benchmark['architecture']}.{suffix}"
+        payload = [(files[f"target/release/{exe}"], exe),
+                   (files[f"target/release/{lib}"], f"lib/{lib}"),
+                   (files["benchmark.json"], "ci-benchmark.json")]
+        pack(path, payload + common, {**manifest, "ci_url": run["url"], "hardware_validated": False})
+        bundles.append(path)
+    for target in ("thumbv7em-none-eabihf", "riscv32imc-unknown-none-elf"):
+        manifest, files = validate_artifact(download / f"embedded-{target}", target, commit, run_id, version)
+        path = dist / f"pxr-{version}-{target}.tar.gz"
+        archive = files[f"target/{target}/release/libpxr_runtime_c_api.a"]
+        pack(path, [(archive, "lib/libpxr_runtime_c_api.a")] + common,
+             {**manifest, "ci_url": run["url"], "features": "no-default-features", "hardware_validated": False})
+        bundles.append(path)
+    manifest, files = validate_artifact(download / "emulated-firmware", "emulated-firmware", commit, run_id, version)
+    path = dist / f"pxr-{version}-qemu-firmware.tar.gz"
+    pack(path, [(source, name.removeprefix("target/")) for name, source in files.items()] + common,
+         {**manifest, "ci_url": run["url"], "hardware_validated": False})
+    bundles.append(path)
+    (dist / "SHA256SUMS").write_text("".join(f"{digest(path)}  {path.name}\n" for path in bundles), encoding="ascii")
+    for path in bundles:
+        print(path.relative_to(ROOT), path.stat().st_size)
 
-for target in ("thumbv7em-none-eabihf", "riscv32imc-unknown-none-elf"):
-    archive = ROOT / "target" / target / "release/libpxr_runtime_c_api.a"
-    bundles.append(pack(f"pxr-{VERSION}-{target}", [(archive, "libpxr_runtime_c_api.a")],
-                        {"version": VERSION, "package_commit": commit, "source_commit": run["headSha"], "target": target,
-                         "toolchain": "Rust 1.98.1", "features": "no-default-features",
-                         "hardware_validated": False}))
 
-(DIST / "SHA256SUMS").write_text("".join(
-    f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in bundles), encoding="ascii")
-for p in bundles:
-    print(p.name, p.stat().st_size)
+if __name__ == "__main__":
+    main()

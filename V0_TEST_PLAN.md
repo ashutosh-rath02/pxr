@@ -19,8 +19,12 @@ overflow, bounded receipts, reproducible traces, and randomized failure sequence
 
 Codec tests cover a reference CRC, exact lengths, reserved fields, all 736 single-bit
 frame mutations, round trips, and 256,000 arbitrary byte/length combinations.
+Receipt codec checks cover all 1,120 single-bit mutations and invalid enum values.
 The C embedding harness links a real C caller with the Rust archive and exercises
-execution, replay rejection, corrupt frames, stream fallback and local recovery.
+execution, replay rejection, corrupt frames, stream fallback, local recovery,
+configuration, discovery, snapshots and frame export. The freestanding QEMU
+harness repeats the dispatch/failure path on Cortex-M and RISC-V, including
+the e-stop clock fence. The Rust embedding example runs on every CI host.
 
 ## Commands
 
@@ -29,6 +33,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo test --workspace --release
+cargo run -p pxr-runtime-core --example embedding
 cargo run --release -p pxr-runtime-sim -- demo
 cargo run --release -p pxr-runtime-sim -- replay examples/demo.pxr
 cargo run --release -p pxr-runtime-sim -- bench 20000
@@ -52,7 +57,12 @@ latency is not separated from the admission measurement.
 Cross-compiled static archives establish that the core needs neither std nor a
 specific CPU. Archive file size contains object/symbol metadata and is not firmware
 flash usage. Board RAM, stack high-water, linked flash size, ISR interference,
-physical stopping distance, and physical verification are not measured in this v0.
+physical stopping distance, and physical verification require a board. The QEMU
+firmware measures linked code, static sections and observed stack high-water for
+its tested paths; these are recorded separately from host latency measurements.
 
-Release only after tests, CLI demonstrations, C integration, and cross-builds pass.
+Release only after tests, CLI demonstrations, C integration, cross-builds and
+emulated firmware pass. Package with `python scripts/package_release.py --ci-run ID`
+from a clean checkout of the exact passing commit; all payloads must match the
+run's source, version and hashes. The release includes a `BUILD.json` per bundle.
 Publish as an experimental prerelease with evidence and limitations included.

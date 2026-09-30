@@ -1,34 +1,47 @@
 # Release validation
 
-Initial implementation commit: `e4eb8d93fa7ee8ceaea1964bc14c778485711dbd`.
-[Public CI run](https://github.com/ashutosh-rath02/pxr/actions/runs/36738972423).
+v0.2 runtime implementation: `63f7fcef68db111826193fc9e452ebaed25aab35`.
+[Passing CI and firmware execution](https://github.com/ashutosh-rath02/pxr/actions/runs/36741849281).
+Release bundles also carry the exact final source revision and CI run in `BUILD.json`.
 
 | Check | Result |
 |---|---|
-| 43 Rust tests, local debug and release | Passed |
-| 43 Rust tests, Linux / Windows / macOS CI | Passed |
+| 47 Rust tests, local debug and release | Passed |
+| 47 Rust tests, Linux / Windows / macOS CI | Passed |
 | Rust 1.85 minimum-version tests | Passed |
 | Formatting and Clippy, warnings denied | Passed on all three CI hosts |
-| Independent Python CLI / golden frame check | Passed locally and on all three CI hosts |
+| Independent Python action/receipt codec and CLI checks | Passed locally and on all three CI hosts |
 | C caller linked to Rust archive, Linux CI | Passed |
 | C caller linked to Rust archive, Windows / Clang 23.1.2 | Passed locally |
-| Cortex-M `no_std` C archive | Built locally and in CI |
-| RISC-V `no_std` C archive | Built locally and in CI |
-| Public demonstration and reproducible benchmark | Ran successfully |
+| Cortex-M4F and RISC-V `no_std` C archives | Built locally and in CI |
+| Cortex-M3 freestanding C/Rust firmware | Executed under QEMU |
+| RISC-V freestanding C/Rust firmware | Executed under QEMU |
 
-The tests include 20,000 randomized fault transitions, 100 identical admission
-traces, a bounded receipt ring, replay-window eviction, 736 single-bit frame
-corruptions and 256,000 arbitrary byte/length combinations. The independent CLI
-check compares repeated trace output and constructs the golden frame with Python's
-`struct` and `zlib`, independently of the Rust encoder.
+Tests include 20,000 randomized fault transitions, 100 identical admission traces,
+replay-window eviction, a bounded receipt ring, 736 single-bit action corruptions,
+1,120 single-bit receipt corruptions and 256,000 arbitrary action byte/length
+combinations. Python independently checks CRCs, offsets and repeatable audit output.
 
-Windows C ABI measurement: context 9,616 bytes; C receipt 104 bytes. The context
-includes the 9,584-byte Rust runtime and four callback/user pointers.
-The local Windows C harness uses LLVM-MinGW's `libunwind.dll` on its toolchain PATH;
-this dependency belongs to that C linker setup, not the public MSVC CLI package.
+The e-stop regression tests prove that older sensor updates and recovery ticks
+cannot undo a newer e-stop. An e-stop with an older tick still attempts fallback
+and preserves the latest clock fence.
 
-Public CLI binaries come from the passing GitHub Actions host builds. Embedded
-archives come from the verified local Rust cross-builds of the same source. Release
-bundles include licenses, contracts and SHA-256 checksums. The GitHub release is
-marked experimental/prerelease. No hardware or authenticated network integration
-was exercised; those are explicitly outside the revised v0 scope.
+The C harness checks typed encoding against an independently assembled frame,
+decoding, configuration, capability discovery, snapshots and receipt export.
+Windows C measurements: context 11,152 bytes; legacy C receipt 104 bytes.
+The runtime contains 11,120 bytes including a 64-entry ring of 128-byte Rust receipts.
+
+The QEMU harness runs without an OS or allocator. It checks valid dispatch,
+duplicate/bounds/corruption rejection, stream fallback, gripper execution, e-stop
+and recovery ordering, snapshot and receipt export. Stack painting reports the
+maximum observed use on these paths. Raw [firmware measurements](evidence/qemu.json)
+and [reproduction instructions](../ports/qemu/README.md) are included.
+
+Every public CLI and static library comes from an exact successful CI revision.
+The packager checks each artifact's source commit, run ID, version and SHA-256
+before creating bundles. `BUILD.json` records toolchain information and hashes of
+packaged files; `SHA256SUMS` covers the archives. These provide traceability and
+corruption checks, not cryptographic attestation of physical execution.
+
+The release is experimental. Physical controllers, authenticated ingress, RTOS
+scheduling and physical stop timing remain device-specific validation work.

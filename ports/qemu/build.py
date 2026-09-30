@@ -31,7 +31,9 @@ for target,arch,flags,emulator,machine in [
     print(sizes)
     fields=sizes.splitlines()[-1].split()
     record={"target":target,"text_bytes":int(fields[0]),"data_bytes":int(fields[1]),"bss_bytes":int(fields[2]),
-            "elf_bytes":elf.stat().st_size,"hardware_validated":False}
+            "elf_bytes":elf.stat().st_size,"hardware_validated":False,"machine":machine,
+            "compiler":subprocess.check_output([clang,"--version"],text=True).splitlines()[0],
+            "build_command":command}
     if not args.build_only:
         command=[emulator,"-M",machine,"-nographic","-semihosting-config","enable=on,target=native","-kernel",str(elf)]
         if arch=="riscv32": command.extend(["-bios","none"])

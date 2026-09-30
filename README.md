@@ -3,9 +3,10 @@
 An open, embedded-first execution boundary between AI-generated actions and physical
 actuators. Rust `no_std` core, fixed memory, transport-independent semantics, C ABI.
 
-**v0.1 is an experimental simulator release.** It demonstrates command admission and
-failure behavior. Physical safety, MCU timing, authenticated networking and hardware
-attestation are not established by this release. See [the safety model](SAFETY_MODEL.md).
+**v0.2 is an experimental SDK release.** It includes a simulator, C and Rust embedding
+examples, and bare-metal firmware tested on Cortex-M and RISC-V under QEMU.
+Physical safety and board timing require device-specific validation.
+See [the safety model](SAFETY_MODEL.md).
 
 ```text
 AI / planner -> trusted adapter -> PXR -> existing driver -> actuator
@@ -28,11 +29,11 @@ cargo run --release -p pxr-runtime-sim -- bench 20000
 Or install the CLI directly from the release tag:
 
 ```sh
-cargo install --git https://github.com/ashutosh-rath02/pxr --tag v0.1.0 pxr-runtime-sim
+cargo install --git https://github.com/ashutosh-rath02/pxr --tag v0.2.0 --locked pxr-runtime-sim
 pxr demo
 ```
 
-Prebuilt Linux, Windows and macOS CLI packages are on the
+Prebuilt Linux, Windows and macOS CLI/SDK packages are on the
 [releases page](https://github.com/ashutosh-rath02/pxr/releases). Verify the included
 SHA-256 checksums, extract the matching OS/architecture package, and run `pxr demo`.
 On Windows use `pxr.exe demo`. On macOS, unsigned downloads may require local
@@ -43,6 +44,15 @@ staleness, missing authority, duplicates, preconditions, watchdog, epoch mismatc
 and failed verification. Its exit code is nonzero if any expected result differs.
 `replay` uses an explicit virtual clock, so repeated traces produce identical output.
 
+```sh
+pxr capabilities
+pxr replay --audit examples/demo.pxr > audit.jsonl
+pxr frame
+pxr receipt-frame
+# Decode either printed hex frame:
+pxr inspect HEX
+```
+
 ## What ships
 
 - Four simulated capabilities: `motor.drive`, `motor.stop`, `gripper.open`, `gripper.close`.
@@ -52,7 +62,9 @@ and failed verification. Its exit code is nonzero if any expected result differs
 - Sequence fencing, bounded duplicate suppression, and boot-session checks.
 - Latched e-stop, local recovery, sensor freshness and watchdog supervision.
 - Driver feedback verification and fixed receipt history, including uncertain outcomes.
-- A 92-byte binary codec, C header, and working C embedding example.
+- A 92-byte action codec and 140-byte receipt codec with authority and state context.
+- C APIs for encoding, configuration, capability discovery, state snapshots and receipts.
+- Working Rust/C embedding examples and freestanding Cortex-M/RISC-V firmware.
 - Fault tests, deterministic traces and reproducible host benchmarks.
 
 No third-party Rust packages are required. There is no transport server, AI model,
@@ -67,6 +79,7 @@ and authorize principals before granting leases. Use a fresh boot ID each restar
 C/C++: build `pxr-runtime-c-api`, include [pxr.h](include/pxr.h), and allocate context
 storage using the exported size/alignment. The [C example](examples/c-embedding/main.c)
 uses static memory and verifies the complete action-to-fallback path.
+Follow the [integration guide](docs/INTEGRATION.md) for the full lifecycle and upgrade notes.
 
 ```sh
 cargo build --release -p pxr-runtime-c-api
@@ -83,16 +96,20 @@ rustup target add thumbv7em-none-eabihf
 cargo build --release -p pxr-runtime-c-api --no-default-features --target thumbv7em-none-eabihf
 ```
 
-The same crate builds for `riscv32imc-unknown-none-elf`. These are compile targets,
-not complete STM32/ESP firmware ports. Bring a clock, trusted sensors, driver,
-fallback policy, supervisor scheduling and an independent hardware watchdog.
+The same crate builds for `riscv32imc-unknown-none-elf`. The
+[QEMU firmware](ports/qemu/README.md) links and executes both ARM Cortex-M3 and
+RISC-V binaries with simulated drivers, recording flash sections and stack use.
+Physical ports supply a clock, trusted sensors, driver, fallback policy,
+supervisor scheduling and an independent hardware watchdog.
 
 ## Contracts and evidence
 
 | Document | Read it for |
 |---|---|
 | [Architecture](ARCHITECTURE.md) | Ownership, bounded memory and embedding obligations |
-| [Action ABI](ACTION_ABI.md) | Byte offsets, time domains, replay and receipts |
+| [Action and receipt ABI](ACTION_ABI.md) | Byte offsets, time domains, replay and receipts |
+| [Integration guide](docs/INTEGRATION.md) | Rust/C lifecycle, discovery, audit export and upgrades |
+| [QEMU firmware](ports/qemu/README.md) | Executable embedded examples and stack measurements |
 | [Capability model](CAPABILITY_MODEL.md) | Profiles, authority and execution classes |
 | [Safety model](SAFETY_MODEL.md) | Failure behavior and guarantee boundaries |
 | [State machine](RUNTIME_STATE_MACHINE.md) | Epochs, faults, e-stop and recovery |
@@ -100,7 +117,7 @@ fallback policy, supervisor scheduling and an independent hardware watchdog.
 | [Research](RESEARCH.md) | Feasibility, overlaps and product direction |
 | [Benchmarks](docs/BENCHMARKS.md) | Measured evidence and unmeasured targets |
 | [Validation](docs/VALIDATION.md) | Passing tests, CI and C integration evidence |
-| [Roadmap](ROADMAP.md) | Work needed beyond the v0 simulation release |
+| [Roadmap](ROADMAP.md) | Completed software scope and physical validation gates |
 
 ```sh
 cargo test --workspace
