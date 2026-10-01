@@ -105,11 +105,35 @@ typedef struct {
     uint16_t retained_receipts;
     uint8_t state, active_leases;
 } pxr_snapshot_record;
+/* Interrupt-safe e-stop request (unreleased). Zero-initialize; change only via pxr_estop_signal_raise. */
+typedef struct { uint32_t opaque; } pxr_estop_signal;
+/* Receives each receipt as a canonical PXR_RECEIPT_FRAME_SIZE frame, in order (unreleased). */
+typedef void (*pxr_receipt_sink)(void *user, const uint8_t *frame);
 
-/* Errors: -1 invalid pointer/size, -2 invalid frame, -3 invalid configuration or
+/* Compile-time layout checks; a mismatch with the Rust definitions fails the build. */
+#define PXR_ASSERT_LAYOUT(name, cond) typedef char pxr_layout_##name[(cond) ? 1 : -1]
+PXR_ASSERT_LAYOUT(observation, sizeof(pxr_observation) == 12);
+PXR_ASSERT_LAYOUT(callbacks, sizeof(pxr_callbacks) == 4 * sizeof(void *));
+PXR_ASSERT_LAYOUT(capability, sizeof(pxr_capability) == 40 && offsetof(pxr_capability, min) == 8);
+PXR_ASSERT_LAYOUT(capability_verify, offsetof(pxr_capability, verify_value) == 36);
+PXR_ASSERT_LAYOUT(lease, sizeof(pxr_lease) == 24);
+PXR_ASSERT_LAYOUT(receipt, sizeof(pxr_receipt_record) == 104
+    && offsetof(pxr_receipt_record, requested) == 72);
+PXR_ASSERT_LAYOUT(receipt_tail, offsetof(pxr_receipt_record, capability) == 96
+    && offsetof(pxr_receipt_record, decision) == 100);
+PXR_ASSERT_LAYOUT(action, sizeof(pxr_action) == 80 && offsetof(pxr_action, valid_for_ms) == 64
+    && offsetof(pxr_action, capability) == 76);
+PXR_ASSERT_LAYOUT(config, sizeof(pxr_config) == 24 && offsetof(pxr_config, invalid_limit) == 20);
+PXR_ASSERT_LAYOUT(snapshot, sizeof(pxr_snapshot_record) == 48
+    && offsetof(pxr_snapshot_record, flags) == 40);
+PXR_ASSERT_LAYOUT(estop_signal, sizeof(pxr_estop_signal) == 4);
+#undef PXR_ASSERT_LAYOUT
+
+/* Errors: -1 invalid pointer/size or uninitialized context, -2 invalid frame, -3 invalid configuration or
  * startup fallback failure, -4 no receipt/capability at index. Positive errors are Reason IDs.
  * No C ABI can validate dangling pointers, buffer lengths or concurrent access.
- * Failed init leaves storage uninitialized: do not call other functions on it.
+ * Failed init leaves storage uninitialized; later calls on it return -1.
+ * boot_id must differ on every boot: derive it from a persisted counter or hardware RNG.
  */
 uint32_t pxr_abi_version(void);
 size_t pxr_context_size(void);
@@ -128,7 +152,8 @@ int32_t pxr_snapshot(const void *, pxr_snapshot_record *out);
 int32_t pxr_get_capability(const void *, size_t index, pxr_capability *out);
 int32_t pxr_receipt_frame(const void *, size_t index, uint8_t *out, size_t length);
 /* initial_flags must come from trusted local sensors. Refresh with pxr_update_state.
- * Defaults: supervisor <=50 ms, sensor age <250 ms, max lease 2000 ms, max TTL 1000 ms.
+ * Defaults (see pxr_config): supervisor <=50 ms, sensor age <250 ms, max lease 2000 ms,
+ * max TTL 1000 ms. pxr_init and pxr_init_custom use the defaults; pxr_init_config does not.
  * Authority adapter must authenticate and authorize requests before acquire/renew.
  */
 int32_t pxr_acquire(void *, uint64_t owner, uint8_t resource, uint64_t capability_mask,
@@ -139,6 +164,7 @@ int32_t pxr_renew(void *, uint64_t owner, uint64_t lease, uint64_t renewal_count
 int32_t pxr_cancel(void *, uint64_t owner, uint64_t lease, uint64_t now);
 /* submit returns 0 for ANY produced receipt: inspect decision/reason.
  * principal/receive time come from the trusted adapter, not the action frame.
+ * executed_at is the controller time passed as `now`, not a driver completion timestamp.
  */
 int32_t pxr_submit(void *, const uint8_t *frame, size_t length, uint64_t principal,
     uint64_t received_at, uint64_t now, pxr_receipt_record *out);
@@ -151,8 +177,23 @@ int32_t pxr_estop(void *, uint64_t now);
 /* Local-only recovery: first clear the physical e-stop using a trusted state update. */
 int32_t pxr_recover_local(void *, uint64_t now);
 uint64_t pxr_epoch(const void *);
-/* index 0 is the oldest retained receipt. Returns -4 after the newest. */
+/* index 0 is the oldest retained receipt. Returns -4 after the newest. When the ring is
+ * full, rejected receipts are evicted before any other decision, so a flood of invalid
+ * frames evicts at most one other receipt. Gaps in receipt_id show eviction. Attach a receipt sink to keep a complete trail. */
 int32_t pxr_receipt(const void *, size_t index, pxr_receipt_record *out);
+
+/* pxr_estop is not interrupt-safe; interrupt handlers must use the signal below.
+ * Safe from any interrupt handler. Every later timestamped call on an attached context
+ * latches e-stop before doing anything else. A null signal is ignored. */
+void pxr_estop_signal_raise(pxr_estop_signal *signal);
+/* The signal must outlive the context; pass NULL to detach. */
+int32_t pxr_attach_estop_signal(void *, pxr_estop_signal *signal);
+/* sink runs inside PXR calls: it must be bounded and must not call PXR. NULL detaches. */
+int32_t pxr_set_receipt_sink(void *, pxr_receipt_sink sink, void *user);
+
+/* Freestanding (no_std) archives only: the integrator defines this. It must drive every
+ * actuator to its safe state and then reset or halt. It must never return or call PXR. */
+void pxr_platform_panic(void);
 #ifdef __cplusplus
 }
 #endif

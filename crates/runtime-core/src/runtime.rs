@@ -1,10 +1,16 @@
 use crate::*;
 
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
+
 #[derive(Clone, Copy)]
 struct Active {
     capability: Capability,
     expires_at: u64,
 }
+const NIL: u8 = u8::MAX;
+
 #[derive(Clone, Copy)]
 struct Replay {
     owner: u64,
@@ -22,8 +28,16 @@ pub struct Runtime {
     active: [Option<Active>; MAX_RESOURCES],
     replay: [Option<Replay>; REPLAY_CAPACITY],
     replay_cursor: usize,
+    // Receipt slots are linked in admission order. When full, the oldest rejection is
+    // evicted first, so a flood of invalid frames cannot erase the authority history.
     receipts: [Option<Receipt>; RECEIPT_CAPACITY],
-    receipt_cursor: usize,
+    order_next: [u8; RECEIPT_CAPACITY],
+    order_prev: [u8; RECEIPT_CAPACITY],
+    order_head: u8,
+    order_tail: u8,
+    reject_next: [u8; RECEIPT_CAPACITY],
+    reject_head: u8,
+    reject_tail: u8,
     receipt_count: usize,
     next_receipt: u64,
     next_lease: u64,
@@ -33,6 +47,7 @@ pub struct Runtime {
     last_tick: u64,
     state: RuntimeState,
     invalid_count: u16,
+    estop_seen: u32,
 }
 
 impl Runtime {
@@ -104,7 +119,13 @@ impl Runtime {
             replay: [None; REPLAY_CAPACITY],
             replay_cursor: 0,
             receipts: [None; RECEIPT_CAPACITY],
-            receipt_cursor: 0,
+            order_next: [NIL; RECEIPT_CAPACITY],
+            order_prev: [NIL; RECEIPT_CAPACITY],
+            order_head: NIL,
+            order_tail: NIL,
+            reject_next: [NIL; RECEIPT_CAPACITY],
+            reject_head: NIL,
+            reject_tail: NIL,
             receipt_count: 0,
             next_receipt: 1,
             next_lease: 1,
@@ -118,6 +139,7 @@ impl Runtime {
                 RuntimeState::SafeIdle
             },
             invalid_count: 0,
+            estop_seen: 0,
         })
     }
 
@@ -158,26 +180,77 @@ impl Runtime {
             next_receipt_id: self.next_receipt,
         }
     }
-    /// Oldest retained receipt first. Overwrite is bounded and observable via receipt IDs.
+    /// Oldest retained receipt first. Eviction is bounded and observable as gaps in receipt IDs;
+    /// rejected receipts are evicted before any other decision.
     pub fn receipt(&self, index: usize) -> Option<Receipt> {
         if index >= self.receipt_count {
             return None;
         }
-        self.receipts[(self.receipt_cursor + RECEIPT_CAPACITY - self.receipt_count + index)
-            % RECEIPT_CAPACITY]
+        let mut slot = self.order_head;
+        for _ in 0..index {
+            slot = self.order_next[slot as usize];
+        }
+        self.receipts[slot as usize]
     }
 
     fn bump_epoch(&mut self) {
         self.epoch = self.epoch.saturating_add(1);
     }
-    fn record(&mut self, mut receipt: Receipt) -> Receipt {
+    fn unlink(&mut self, slot: u8) {
+        let (prev, next) = (
+            self.order_prev[slot as usize],
+            self.order_next[slot as usize],
+        );
+        match prev {
+            NIL => self.order_head = next,
+            p => self.order_next[p as usize] = next,
+        }
+        match next {
+            NIL => self.order_tail = prev,
+            n => self.order_prev[n as usize] = prev,
+        }
+    }
+    fn record(&mut self, mut receipt: Receipt, driver: &mut impl Driver) -> Receipt {
         receipt.receipt_id = self.next_receipt;
         self.next_receipt = self.next_receipt.saturating_add(1);
-        self.receipts[self.receipt_cursor] = Some(receipt);
-        self.receipt_cursor = (self.receipt_cursor + 1) % RECEIPT_CAPACITY;
-        self.receipt_count = (self.receipt_count + 1).min(RECEIPT_CAPACITY);
+        let slot = if self.receipt_count < RECEIPT_CAPACITY {
+            self.receipt_count += 1;
+            (self.receipt_count - 1) as u8
+        } else if self.reject_head != NIL {
+            let slot = self.reject_head;
+            self.reject_head = self.reject_next[slot as usize];
+            if self.reject_head == NIL {
+                self.reject_tail = NIL;
+            }
+            self.unlink(slot);
+            slot
+        } else {
+            // No rejections are retained, so the oldest receipt is not a rejection either.
+            let slot = self.order_head;
+            self.unlink(slot);
+            slot
+        };
+        let i = slot as usize;
+        self.receipts[i] = Some(receipt);
+        self.order_prev[i] = self.order_tail;
+        self.order_next[i] = NIL;
+        match self.order_tail {
+            NIL => self.order_head = slot,
+            t => self.order_next[t as usize] = slot,
+        }
+        self.order_tail = slot;
+        if receipt.decision == Decision::Rejected {
+            self.reject_next[i] = NIL;
+            match self.reject_tail {
+                NIL => self.reject_head = slot,
+                t => self.reject_next[t as usize] = slot,
+            }
+            self.reject_tail = slot;
+        }
+        driver.record_receipt(&receipt);
         receipt
     }
+    #[allow(clippy::too_many_arguments)] // one receipt field per argument
     fn event(
         &mut self,
         resource: u8,
@@ -186,8 +259,9 @@ impl Runtime {
         decision: Decision,
         reason: Reason,
         now: u64,
+        driver: &mut impl Driver,
     ) {
-        self.record(Receipt {
+        let receipt = Receipt {
             boot_id: self.boot_id,
             principal,
             safety_flags: self.flags,
@@ -210,7 +284,8 @@ impl Runtime {
             original_receipt: 0,
             dispatched: decision == Decision::Fallback,
             observed_valid: false,
-        });
+        };
+        self.record(receipt, driver);
     }
     fn refresh_state(&mut self) {
         if matches!(self.state, RuntimeState::SafeIdle | RuntimeState::Armed) {
@@ -241,6 +316,7 @@ impl Runtime {
             Decision::Fallback,
             if ok { reason } else { Reason::Driver },
             now,
+            driver,
         );
         ok
     }
@@ -327,6 +403,18 @@ impl Runtime {
         self.last_tick = self.last_tick.max(now);
         self.flags |= self.config.estop_mask;
         self.trip(Reason::Estop, self.last_tick, driver);
+    }
+
+    /// Latch e-stop if `signal` was raised since the last poll. Call before other operations;
+    /// the signal itself may be raised from an interrupt handler.
+    pub fn poll_estop(&mut self, signal: &EstopSignal, now: u64, driver: &mut impl Driver) -> bool {
+        let raised = signal.raised();
+        if raised == self.estop_seen {
+            return false;
+        }
+        self.estop_seen = raised;
+        self.emergency_stop(now, driver);
+        true
     }
 
     /// This API must only be exposed to a trusted local operator/interlock.
@@ -429,6 +517,7 @@ impl Runtime {
             Decision::Control,
             Reason::LeaseGranted,
             now,
+            driver,
         );
         Ok(lease)
     }
@@ -467,6 +556,7 @@ impl Runtime {
             Decision::Control,
             Reason::LeaseRenewed,
             now,
+            driver,
         );
         Ok(lease)
     }
@@ -613,7 +703,7 @@ impl Runtime {
                         .map_or(0, |r| r.receipt);
                 }
                 self.invalid_count = self.invalid_count.saturating_add(1);
-                let result = self.record(receipt);
+                let result = self.record(receipt, driver);
                 if self.invalid_count >= self.config.invalid_limit
                     && self.state == RuntimeState::Armed
                 {
@@ -672,12 +762,12 @@ impl Runtime {
                         },
                     })
                 };
-                self.record(receipt)
+                self.record(receipt, driver)
             }
             Err(reason) => {
                 receipt.decision = Decision::Failed;
                 receipt.reason = reason;
-                let receipt = self.record(receipt);
+                let receipt = self.record(receipt, driver);
                 self.trip(reason, now, driver);
                 receipt
             }

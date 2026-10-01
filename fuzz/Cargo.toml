@@ -1,0 +1,39 @@
+[package]
+name = "pxr-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Separate workspace: libfuzzer-sys never becomes a dependency of the shipped crates.
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pxr-runtime-core = { path = "../crates/runtime-core" }
+pxr-runtime-codec = { path = "../crates/runtime-codec" }
+pxr-runtime-sim = { path = "../crates/runtime-sim" }
+
+[[bin]]
+name = "decode_action"
+path = "fuzz_targets/decode_action.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_receipt"
+path = "fuzz_targets/decode_receipt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "runtime_ops"
+path = "fuzz_targets/runtime_ops.rs"
+test = false
+doc = false
+bench = false

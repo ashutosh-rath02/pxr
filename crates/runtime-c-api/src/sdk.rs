@@ -282,7 +282,7 @@ pub unsafe extern "C" fn pxr_decode_action(
 /// ctx is initialized readable storage; out is separate aligned writable storage. No concurrent mutation.
 #[no_mangle]
 pub unsafe extern "C" fn pxr_snapshot(ctx: *const c_void, out: *mut CSnapshot) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) || !valid_pointer(out) {
+    if !unsafe { valid_context(ctx) } || !valid_pointer(out) {
         return -1;
     }
     let s = unsafe { (&*ctx.cast::<Context>()).runtime.snapshot() };
@@ -312,7 +312,7 @@ pub unsafe extern "C" fn pxr_get_capability(
     index: usize,
     out: *mut CCapability,
 ) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) || !valid_pointer(out) {
+    if !unsafe { valid_context(ctx) } || !valid_pointer(out) {
         return -1;
     }
     let c = unsafe { &*ctx.cast::<Context>() };
@@ -336,7 +336,7 @@ pub unsafe extern "C" fn pxr_receipt_frame(
     out: *mut u8,
     length: usize,
 ) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) || out.is_null() {
+    if !unsafe { valid_context(ctx) } || out.is_null() {
         return -1;
     }
     if length != pxr_runtime_codec::RECEIPT_FRAME_SIZE {

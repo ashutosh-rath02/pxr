@@ -3,60 +3,37 @@
  * It does not model physical dynamics or prove target timing.
  */
 #include "pxr.h"
+#include "platform.h"
 #include <stdint.h>
 #include <stddef.h>
 
 static _Alignas(16) uint8_t runtime_storage[16384];
 static int32_t velocity[2];
-static uint32_t gripper_open, executions, fallback_calls;
+static uint32_t gripper_open, executions, fallback_calls, sink_frames;
+static pxr_estop_signal estop_signal;
+static volatile uint32_t interrupt_fired;
+static uint8_t never_initialized[64] __attribute__((aligned(16)));
 extern uint32_t __stack_bottom, __stack_top;
 
-static uintptr_t semihost(uintptr_t operation, uintptr_t argument) {
+/* A real timer interrupt raises the e-stop signal while the main loop is running. */
 #if defined(__arm__)
-    register uintptr_t a __asm__("r0") = operation;
-    register uintptr_t b __asm__("r1") = argument;
-    __asm__ volatile("bkpt 0xab" : "+r"(a) : "r"(b) : "memory");
+#define SYST_CSR (*(volatile uint32_t *)0xE000E010u)
+#define SYST_RVR (*(volatile uint32_t *)0xE000E014u)
+#define SYST_CVR (*(volatile uint32_t *)0xE000E018u)
+static void arm_timer(void) { SYST_RVR=5000; SYST_CVR=0; SYST_CSR=7; }
+static void disarm_timer(void) { SYST_CSR=0; }
 #elif defined(__riscv)
-    register uintptr_t a __asm__("a0") = operation;
-    register uintptr_t b __asm__("a1") = argument;
-    __asm__ volatile(".option push\n.option norvc\nslli zero,zero,31\nebreak\nsrai zero,zero,7\n.option pop"
-                     : "+r"(a) : "r"(b) : "memory");
+#define MTIME_LO (*(volatile uint32_t *)0x0200BFF8u)
+#define MTIMECMP_LO (*(volatile uint32_t *)0x02004000u)
+#define MTIMECMP_HI (*(volatile uint32_t *)0x02004004u)
+static void disarm_timer(void) { MTIMECMP_HI=0xffffffffu; MTIMECMP_LO=0xffffffffu; }
+static void arm_timer(void) {
+    uint32_t when=MTIME_LO+1000; MTIMECMP_HI=0xffffffffu; MTIMECMP_LO=when; MTIMECMP_HI=0;
+    __asm__ volatile("csrs mie, %0" :: "r"(1u<<7));
+    __asm__ volatile("csrsi mstatus, 8");
+}
 #endif
-    return a;
-}
-static void print(const char *s) { (void)semihost(4,(uintptr_t)s); }
-static void number(uint32_t value) {
-    char out[11]; unsigned i=10; out[i]=0;
-    do { out[--i]=(char)('0'+value%10); value/=10; } while(value);
-    print(out+i);
-}
-__attribute__((noreturn)) void platform_exit(uint32_t code) {
-    uintptr_t block[2] = {0x20026,code};
-    (void)semihost(0x20,(uintptr_t)block);
-    for (;;) { }
-}
-static void check(int ok,unsigned line) {
-    if (!ok) { print("PXR_QEMU_FAIL line="); number(line); print("\n"); platform_exit(1); }
-}
-#define CHECK(expr) check(!!(expr),__LINE__)
-
-/* Core may emit these intrinsics. No allocator, syscalls, or C library is linked. */
-void *memcpy(void *dest,const void *source,size_t n) {
-    unsigned char *d=dest; const unsigned char *s=source;
-    for(size_t i=0;i<n;++i) d[i]=s[i]; return dest;
-}
-void *memset(void *dest,int value,size_t n) {
-    unsigned char *d=dest; for(size_t i=0;i<n;++i) d[i]=(unsigned char)value; return dest;
-}
-void *memmove(void *dest,const void *source,size_t n) {
-    unsigned char *d=dest; const unsigned char *s=source;
-    if ((uintptr_t)d<(uintptr_t)s) { for(size_t i=0;i<n;++i) d[i]=s[i]; }
-    else { while(n) { --n; d[n]=s[n]; } } return dest;
-}
-int memcmp(const void *left,const void *right,size_t n) {
-    const unsigned char *a=left,*b=right;
-    for(size_t i=0;i<n;++i) { if(a[i]!=b[i]) return a[i]<b[i]?-1:1; } return 0;
-}
+void timer_interrupt(void) { disarm_timer(); pxr_estop_signal_raise(&estop_signal); interrupt_fired=1; }
 
 static int32_t observe(void *user,uint8_t resource,pxr_observation *out) {
     (void)user; out->parameters[0]=resource==0?velocity[0]:0;
@@ -71,6 +48,9 @@ static int32_t execute(void *user,uint16_t capability,int32_t p0,int32_t p1) {
         case 4: gripper_open=0; break;
         default:return -1;
     } return 0;
+}
+static void sink(void *user,const uint8_t *frame) {
+    (void)user; if(frame[0]=='P' && frame[1]=='X' && frame[2]=='R' && frame[3]=='R') ++sink_frames;
 }
 static int32_t fallback(void *user,uint8_t resource,uint16_t reason) {
     (void)user;(void)reason;++fallback_calls;
@@ -112,6 +92,20 @@ void test_main(void) {
     uint8_t receipt_frame[PXR_RECEIPT_FRAME_SIZE];
     CHECK(pxr_receipt_frame(runtime_storage,1,receipt_frame,sizeof(receipt_frame))==0);
     CHECK(receipt_frame[0]=='P' && receipt_frame[8]==42 && receipt_frame[16]==7);
+    CHECK(pxr_tick(never_initialized,0)==-1);
+    CHECK(pxr_set_receipt_sink(runtime_storage,sink,NULL)==0);
+    CHECK(pxr_attach_estop_signal(runtime_storage,&estop_signal)==0);
+    CHECK(pxr_update_state(runtime_storage,0,130)==0);
+    CHECK(pxr_acquire(runtime_storage,7,0,6,500,-500,500,-1000,1000,130,&lease)==0);
+    action=(pxr_action){42,7,lease.id,4,4,lease.epoch,130,150,100,{300,0},1,0};
+    CHECK(pxr_encode_action(&action,frame,sizeof(frame))==0);
+    CHECK(pxr_submit(runtime_storage,frame,sizeof(frame),7,130,130,&receipt)==0);
+    CHECK(receipt.decision==PXR_EXECUTED && velocity[0]==300);
+    arm_timer();
+    uint32_t spins=0; while(!interrupt_fired) { CHECK(++spins<100000000u); }
+    CHECK(velocity[0]==300);
+    CHECK(pxr_tick(runtime_storage,131)==PXR_STATE_ESTOPPED && velocity[0]==0);
+    CHECK(sink_frames>=3);
     volatile uint32_t *mark=&__stack_bottom;
     while(mark<&__stack_top && *mark==0xa5a5a5a5u) ++mark;
     uint32_t used=(uint32_t)((uintptr_t)&__stack_top-(uintptr_t)mark);
@@ -119,6 +113,7 @@ void test_main(void) {
     print("PXR_QEMU_PASS context_bytes="); number((uint32_t)pxr_context_size());
     print(" stack_high_water_bytes="); number(used);
     print(" driver_executions="); number(executions);
-    print(" fallbacks="); number(fallback_calls); print("\n");
+    print(" fallbacks="); number(fallback_calls);
+    print(" interrupt_estop=1 sink_frames="); number(sink_frames); print("\n");
     platform_exit(0);
 }

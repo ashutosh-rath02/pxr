@@ -4,9 +4,10 @@
 .section .vectors,"a"
 .word __stack_top
 .word _start
-.rept 14
+.rept 13
 .word trap
 .endr
+.word timer_interrupt
 .section .text._start,"ax"
 .global _start
 .thumb_func
