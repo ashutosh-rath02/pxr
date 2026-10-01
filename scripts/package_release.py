@@ -117,7 +117,7 @@ def main():
     pack(path, [(source, name.removeprefix("target/")) for name, source in files.items()] + common,
          {**manifest, "ci_url": run["url"], "hardware_validated": False})
     bundles.append(path)
-    (dist / "SHA256SUMS").write_text("".join(f"{digest(path)}  {path.name}\n" for path in bundles), encoding="ascii")
+    (dist / "SHA256SUMS").write_text("".join(f"{digest(path)}  {path.name}\n" for path in bundles), encoding="ascii", newline="\n")
     for path in bundles:
         print(path.relative_to(ROOT), path.stat().st_size)
 
