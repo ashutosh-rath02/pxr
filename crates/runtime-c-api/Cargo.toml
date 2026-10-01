@@ -15,8 +15,8 @@ default = ["std"]
 std = []
 
 [dependencies]
-pxr-runtime-core = { path = "../runtime-core", version = "0.2.0" }
-pxr-runtime-codec = { path = "../runtime-codec", version = "0.2.0" }
+pxr-runtime-core = { path = "../runtime-core", version = "0.3.0" }
+pxr-runtime-codec = { path = "../runtime-codec", version = "0.3.0" }
 
 [lints]
 workspace = true

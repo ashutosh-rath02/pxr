@@ -105,9 +105,9 @@ typedef struct {
     uint16_t retained_receipts;
     uint8_t state, active_leases;
 } pxr_snapshot_record;
-/* Interrupt-safe e-stop request (unreleased). Zero-initialize; change only via pxr_estop_signal_raise. */
+/* Interrupt-safe e-stop request (0.3). Zero-initialize; change only via pxr_estop_signal_raise. */
 typedef struct { uint32_t opaque; } pxr_estop_signal;
-/* Receives each receipt as a canonical PXR_RECEIPT_FRAME_SIZE frame, in order (unreleased). */
+/* Receives each receipt as a canonical PXR_RECEIPT_FRAME_SIZE frame, in order (0.3). */
 typedef void (*pxr_receipt_sink)(void *user, const uint8_t *frame);
 
 /* Compile-time layout checks; a mismatch with the Rust definitions fails the build. */

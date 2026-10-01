@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "pxr-playground"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "pxr-runtime-core",
  "pxr-runtime-sim",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "pxr-runtime-c-api"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "pxr-runtime-codec",
  "pxr-runtime-core",
@@ -20,18 +20,18 @@ dependencies = [
 
 [[package]]
 name = "pxr-runtime-codec"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "pxr-runtime-core",
 ]
 
 [[package]]
 name = "pxr-runtime-core"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "pxr-runtime-sim"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "pxr-runtime-codec",
  "pxr-runtime-core",

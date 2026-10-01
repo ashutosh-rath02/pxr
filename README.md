@@ -12,7 +12,7 @@ the local controller invokes its configured fallback.
 
 **Rust `no_std` · Fixed memory · C/C++ interface · No external Rust dependencies**
 
-[Try in your browser](https://ashutosh-rath02.github.io/pxr/) · [Quickstart](#quickstart) · [Embedding](#embedding) · [Benchmarks](#benchmarks) · [Downloads](https://github.com/ashutosh-rath02/pxr/releases/tag/v0.2.0)
+[Try in your browser](https://ashutosh-rath02.github.io/pxr/) · [Quickstart](#quickstart) · [Embedding](#embedding) · [Benchmarks](#benchmarks) · [Downloads](https://github.com/ashutosh-rath02/pxr/releases/tag/v0.3.0)
 
 ```text
 Planner → authenticated adapter → PXR → device driver → actuator
@@ -24,9 +24,8 @@ Use PXR when an AI system, planner, or remote application sends bounded commands
 and the device must decide whether each command is still authorized and valid.
 The application supplies the transport, authenticated identity, sensors, and drivers.
 
-**Status:** v0.2.0 developer preview. `main` also contains unreleased changes:
-an interrupt-safe e-stop signal, a receipt sink, eviction that protects executions,
-and a required `pxr_platform_panic` hook for freestanding C builds.
+**Status:** v0.3.0 developer preview. Freestanding C builds must now define
+`pxr_platform_panic` (see [Embedding](#embedding)).
 Host tests and Cortex-M/RISC-V emulation pass.
 Physical board timing and actuator behavior require device-specific validation.
 
@@ -40,7 +39,7 @@ and export the results as JSON. All device behavior and time are simulated.
 With [Rust 1.85 or newer](https://www.rust-lang.org/tools/install):
 
 ```sh
-cargo install --git https://github.com/ashutosh-rath02/pxr --tag v0.2.0 --locked pxr-runtime-sim
+cargo install --git https://github.com/ashutosh-rath02/pxr --tag v0.3.0 --locked pxr-runtime-sim
 pxr demo
 ```
 
@@ -57,7 +56,7 @@ failure code if any expected result changes. The reference profile exposes
 | Local state blocks the operation | `REJECTED_PRECONDITION` |
 | Supervisor detects loss of progress | `WATCHDOG_TRIGGERED`, followed by fallback |
 
-[Prebuilt downloads](https://github.com/ashutosh-rath02/pxr/releases/tag/v0.2.0)
+[Prebuilt downloads](https://github.com/ashutosh-rath02/pxr/releases/tag/v0.3.0)
 include Linux x86-64, Windows x86-64, and macOS Apple Silicon CLI/SDK bundles.
 Check `SHA256SUMS` and the platform requirements on the release page before use.
 
@@ -119,8 +118,8 @@ the supervisor independently of incoming traffic.
 
 ```toml
 [dependencies]
-pxr-runtime-core = { git = "https://github.com/ashutosh-rath02/pxr", tag = "v0.2.0" }
-pxr-runtime-codec = { git = "https://github.com/ashutosh-rath02/pxr", tag = "v0.2.0" }
+pxr-runtime-core = { git = "https://github.com/ashutosh-rath02/pxr", tag = "v0.3.0" }
+pxr-runtime-codec = { git = "https://github.com/ashutosh-rath02/pxr", tag = "v0.3.0" }
 ```
 
 ```sh
