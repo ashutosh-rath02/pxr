@@ -77,6 +77,25 @@ jobs:
           path: |
             target/qemu/
             artifact-manifest.json
+  renode-board-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+      - run: rustup target add thumbv7em-none-eabi
+      - name: Install Renode 1.17.0 (pinned by SHA-256)
+        run: |
+          curl -fsSL -o renode.tar.gz https://github.com/renode/renode/releases/download/v1.17.0/renode-1.17.0.linux-portable.tar.gz
+          echo "4ba7c68b59e2447f188ef4b4b112fcccd2802582c460beedceb63b84e5605a5f  renode.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/renode"
+          tar -xzf renode.tar.gz -C "$RUNNER_TEMP/renode" --strip-components=1
+      - run: python3 ports/renode/run.py
+        env:
+          RENODE: ${{ runner.temp }}/renode/renode
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: renode-board-model
+          path: target/renode/
   msrv:
     runs-on: ubuntu-latest
     steps:
@@ -161,7 +180,7 @@ jobs:
           path: dist/playground
   deploy-playground:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [host, embedded, emulated-firmware, msrv, miri, kani, fuzz, playground]
+    needs: [host, embedded, emulated-firmware, renode-board-model, msrv, miri, kani, fuzz, playground]
     runs-on: ubuntu-latest
     permissions:
       actions: read

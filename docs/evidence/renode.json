@@ -1,0 +1,51 @@
+{
+  "source": "local run on Windows 11 (Renode 1.17.0 portable) from an uncommitted tree based on ac38edcaef3390f1e36aa6753236852fa6c91eba",
+  "note": "Regenerate with python3 ports/renode/run.py; instruction counts are emulated, not cycles",
+  "measurements": {
+    "target": "thumbv7em-none-eabi",
+    "board": "Renode stm32f4_discovery-kit (STM32F407, Cortex-M4)",
+    "hardware_validated": false,
+    "context_bytes": 11336,
+    "stack_high_water_bytes": 2428,
+    "driver_executions": 3,
+    "fallbacks": 13,
+    "interrupt_estop": 1,
+    "sink_frames": 4,
+    "timing_instructions": {
+      "submit_executed": {
+        "min": 2628,
+        "max": 2629
+      },
+      "submit_duplicate": {
+        "min": 1861,
+        "max": 2914
+      },
+      "submit_bound": {
+        "min": 2396,
+        "max": 2397
+      },
+      "submit_bad_crc": {
+        "min": 828,
+        "max": 829
+      },
+      "tick_idle": {
+        "min": 185,
+        "max": 186
+      },
+      "update_state_change": {
+        "min": 201,
+        "max": 290
+      },
+      "estop_two_fallbacks": {
+        "min": 1089,
+        "max": 1090
+      },
+      "receipt_read_newest": {
+        "min": 442,
+        "max": 443
+      }
+    },
+    "timing_method": "Renode SysTick ticks scaled by a 200,000-instruction calibration loop; virtual time, not cycles",
+    "emulator": "Renode v1.17.0\n  build: 1.17.0+20260906gitf1dd1b4af\n  build type: Release\n  runtime: .NET 8.0.10"
+  }
+}

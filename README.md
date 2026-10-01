@@ -196,25 +196,28 @@ while the main loop runs, then checks that the next call stops the motor.
 
 ### Emulated instruction counts
 
-A separate [timing image](ports/qemu/timing.c) runs under QEMU `-icount shift=0`.
+A separate [timing image](ports/qemu/timing.c) runs under QEMU `-icount shift=0` and on
+Renode's STM32F4 Discovery board model ([runner](ports/renode/run.py)).
 Each call is measured 32 times with the replay history and receipt ring already full,
 so every call takes its longest path. The table gives the worst case per call.
 
-| Call | RISC-V RV32IMC (exact) | Cortex-M3 (±80) |
-|---|---:|---:|
-| `pxr_submit`, executed | 5,388 | 2,640 |
-| `pxr_submit`, duplicate | 5,674 | 2,880 |
-| `pxr_submit`, out of bounds | 5,137 | 2,400 |
-| `pxr_submit`, corrupt CRC | 1,566 | 880 |
-| `pxr_tick`, idle | 237 | 240 |
-| `pxr_update_state`, flags changed | 348 | 320 |
-| `pxr_estop`, two fallbacks | 3,651 | 1,120 |
+| Call | RISC-V RV32IMC, QEMU (exact) | Cortex-M3, QEMU (±80) | STM32F407, Renode |
+|---|---:|---:|---:|
+| `pxr_submit`, executed | 5,388 | 2,640 | 2,629 |
+| `pxr_submit`, duplicate | 5,674 | 2,880 | 2,914 |
+| `pxr_submit`, out of bounds | 5,137 | 2,400 | 2,397 |
+| `pxr_submit`, corrupt CRC | 1,566 | 880 | 829 |
+| `pxr_tick`, idle | 237 | 240 | 186 |
+| `pxr_update_state`, flags changed | 348 | 320 | 290 |
+| `pxr_estop`, two fallbacks | 3,651 | 1,120 | 1,090 |
 
 These are emulated retired instructions, not cycles. Real cores add pipeline stalls,
 flash wait states, and bus contention, and QEMU does not model them. On Cortex-M the
 counter is SysTick, which QEMU advances once per 80 instructions; RISC-V uses `minstret`.
-Both are calibrated against a 200,000-instruction loop.
-[Raw counts](docs/evidence/qemu.json)
+Renode also uses SysTick, with finer resolution. All three are calibrated against a
+200,000-instruction loop. The Renode run also executes the functional firmware over the
+board's USART2, including the SysTick-raised e-stop.
+[QEMU counts](docs/evidence/qemu.json) · [Renode counts](docs/evidence/renode.json)
 
 ### Plant-in-the-loop simulation
 
@@ -290,9 +293,10 @@ python3 ports/qemu/build.py
 Physical completion depends on the driver's observation contract. Replay state is
 volatile. Receipts are unsigned unless the platform signs them in its receipt sink,
 and the in-memory ring keeps only the most recent 64.
-Duplicate action IDs are detected within the last 32 admitted actions. Older frames
-are still fenced by lease ID and sequence. However, a client that reuses an action ID
-under a new lease can have it executed again, so retries must be idempotent or use fresh IDs.
+Duplicate action IDs are detected within the last 32 admitted actions. An exact replay
+is always rejected, because each lease accepts a sequence number only once. However, an
+action ID reused with a new sequence number after 32 newer admitted actions executes
+again, even within the same lease. Retries must therefore be idempotent or use fresh IDs.
 Device-specific constraints, authenticated ingress, physical protection, and
 measured scheduling budgets remain the integrator's responsibility.
 

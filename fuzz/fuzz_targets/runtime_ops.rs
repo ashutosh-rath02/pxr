@@ -26,7 +26,7 @@ impl Bytes<'_> {
 fuzz_target!(|data: &[u8]| {
     let mut input = Bytes(data);
     let mut s = Simulation::default();
-    let mut executed: Vec<(u64, u64)> = Vec::new();
+    let mut executed: Vec<(u64, u64, u64)> = Vec::new();
     let mut next_id = 0u64;
     while let Some(op) = input.u8() {
         match op % 10 {
@@ -82,9 +82,20 @@ fuzz_target!(|data: &[u8]| {
                 let before = s.driver.executions;
                 let receipt = s.submit(action);
                 if s.driver.executions > before {
-                    let key = (action.lease_id, action.action_id);
-                    assert!(!executed.contains(&key), "frame dispatched twice");
-                    executed.push(key);
+                    // Exact replays share lease and sequence; those never dispatch twice.
+                    // Reused action IDs are only deduplicated inside the replay window.
+                    for (n, &(lease, sequence, id)) in executed.iter().enumerate() {
+                        assert!(
+                            (lease, sequence) != (action.lease_id, action.sequence),
+                            "sequence dispatched twice"
+                        );
+                        assert!(
+                            (lease, id) != (action.lease_id, action.action_id)
+                                || executed.len() - n > REPLAY_CAPACITY,
+                            "action ID re-dispatched inside the replay window"
+                        );
+                    }
+                    executed.push((action.lease_id, action.sequence, action.action_id));
                     assert!(receipt.dispatched);
                     assert!(CAPABILITIES
                         .iter()

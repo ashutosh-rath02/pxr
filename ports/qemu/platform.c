@@ -1,6 +1,25 @@
 #include "platform.h"
 #include <stddef.h>
 
+#if defined(PXR_UART_BASE)
+/* STM32-style USART (used under Renode): SR.TXE gates DR writes. */
+#define UART_SR (*(volatile uint32_t *)(PXR_UART_BASE + 0x00u))
+#define UART_DR (*(volatile uint32_t *)(PXR_UART_BASE + 0x04u))
+#define UART_CR1 (*(volatile uint32_t *)(PXR_UART_BASE + 0x0Cu))
+#define RCC_APB1ENR (*(volatile uint32_t *)0x40023840u)
+void print(const char *s) {
+    static int ready;
+    if (!ready) { RCC_APB1ENR |= 1u<<17; UART_CR1 = (1u<<13)|(1u<<3); ready=1; }
+    for (; *s; ++s) {
+        for (uint32_t spin=0; !(UART_SR & 0x80u) && spin<100000u; ++spin) { }
+        UART_DR = (uint8_t)*s;
+    }
+}
+__attribute__((noreturn)) void platform_exit(uint32_t code) {
+    print("PXR_EXIT code="); number(code); print("\n");
+    for (;;) { __asm__ volatile("wfi"); }
+}
+#else
 static uintptr_t semihost(uintptr_t operation, uintptr_t argument) {
 #if defined(__arm__)
     register uintptr_t a __asm__("r0") = operation;
@@ -15,15 +34,16 @@ static uintptr_t semihost(uintptr_t operation, uintptr_t argument) {
     return a;
 }
 void print(const char *s) { (void)semihost(4,(uintptr_t)s); }
-void number(uint32_t value) {
-    char out[11]; unsigned i=10; out[i]=0;
-    do { out[--i]=(char)('0'+value%10); value/=10; } while(value);
-    print(out+i);
-}
 __attribute__((noreturn)) void platform_exit(uint32_t code) {
     uintptr_t block[2] = {0x20026,code};
     (void)semihost(0x20,(uintptr_t)block);
     for (;;) { }
+}
+#endif
+void number(uint32_t value) {
+    char out[11]; unsigned i=10; out[i]=0;
+    do { out[--i]=(char)('0'+value%10); value/=10; } while(value);
+    print(out+i);
 }
 void pxr_platform_panic(void) { print("PXR_QEMU_PANIC\n"); platform_exit(3); }
 
