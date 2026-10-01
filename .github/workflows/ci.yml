@@ -92,12 +92,22 @@ jobs:
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
   kani:
+    strategy:
+      fail-fast: false
+      matrix:
+        harness:
+          - submit_dispatches_only_admissible_actions
+          - emergency_stop_blocks_dispatch_until_local_recovery
+          - tick_revokes_expired_or_unsupervised_authority
+          - receipts_never_wrap_or_lose_order
+          - raised_estop_signal_blocks_the_next_dispatch
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: cargo install --locked kani-verifier --version 0.68.0
       - run: cargo kani setup
-      - run: cargo kani -p pxr-runtime-core
+      - run: cargo kani -p pxr-runtime-core --harness ${{ matrix.harness }}
   fuzz:
     strategy:
       matrix:

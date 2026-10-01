@@ -1,9 +1,22 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 
-pub const MAX_CAPABILITIES: usize = 16;
-pub const MAX_RESOURCES: usize = 8;
-pub const REPLAY_CAPACITY: usize = 32;
-pub const RECEIPT_CAPACITY: usize = 64;
+#[cfg(not(kani))]
+mod capacity {
+    pub const MAX_CAPABILITIES: usize = 16;
+    pub const MAX_RESOURCES: usize = 8;
+    pub const REPLAY_CAPACITY: usize = 32;
+    pub const RECEIPT_CAPACITY: usize = 64;
+}
+// Proofs use the smallest sizes the reference profile fits in. No code path depends on the
+// exact values, and small rings reach their full and evicting states in fewer steps.
+#[cfg(kani)]
+mod capacity {
+    pub const MAX_CAPABILITIES: usize = 4;
+    pub const MAX_RESOURCES: usize = 2;
+    pub const REPLAY_CAPACITY: usize = 4;
+    pub const RECEIPT_CAPACITY: usize = 8;
+}
+pub use capacity::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bounds {

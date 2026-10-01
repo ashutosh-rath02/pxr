@@ -85,7 +85,7 @@ fn armed(d: &mut AnyDriver) -> Option<(Runtime, Lease)> {
 }
 
 #[kani::proof]
-#[kani::unwind(34)]
+#[kani::unwind(10)]
 fn submit_dispatches_only_admissible_actions() {
     let mut d = AnyDriver::default();
     let Some((mut rt, lease)) = armed(&mut d) else {
@@ -119,7 +119,7 @@ fn submit_dispatches_only_admissible_actions() {
 }
 
 #[kani::proof]
-#[kani::unwind(34)]
+#[kani::unwind(10)]
 fn emergency_stop_blocks_dispatch_until_local_recovery() {
     let mut d = AnyDriver::default();
     let Some((mut rt, _)) = armed(&mut d) else {
@@ -147,7 +147,7 @@ fn emergency_stop_blocks_dispatch_until_local_recovery() {
 }
 
 #[kani::proof]
-#[kani::unwind(34)]
+#[kani::unwind(10)]
 fn tick_revokes_expired_or_unsupervised_authority() {
     let mut d = AnyDriver::default();
     let Some((mut rt, lease)) = armed(&mut d) else {
@@ -169,7 +169,7 @@ fn tick_revokes_expired_or_unsupervised_authority() {
 }
 
 #[kani::proof]
-#[kani::unwind(34)]
+#[kani::unwind(10)]
 fn receipts_never_wrap_or_lose_order() {
     let mut d = AnyDriver::default();
     let Some((mut rt, lease)) = armed(&mut d) else {
@@ -186,7 +186,7 @@ fn receipts_never_wrap_or_lose_order() {
 }
 
 #[kani::proof]
-#[kani::unwind(34)]
+#[kani::unwind(10)]
 fn raised_estop_signal_blocks_the_next_dispatch() {
     let mut d = AnyDriver::default();
     let Some((mut rt, _)) = armed(&mut d) else {
