@@ -1,32 +1,110 @@
 {
-  "ci_run": "https://github.com/ashutosh-rath02/pxr/actions/runs/36741849281",
-  "source_commit": "63f7fcef68db111826193fc9e452ebaed25aab35",
+  "source": "local run on Windows 11 (QEMU 11.1.0, clang from LLVM) from an uncommitted tree based on b29defb8aa3413f7f13b8485ec7dc5bf79862cec",
+  "note": "Regenerate in CI with python3 ports/qemu/build.py; instruction counts are emulated, not cycles",
   "measurements": [
     {
       "target": "thumbv7m-none-eabi",
-      "text_bytes": 21920,
+      "text_bytes": 22672,
       "data_bytes": 0,
-      "bss_bytes": 16404,
-      "elf_bytes": 864716,
+      "bss_bytes": 16480,
+      "elf_bytes": 869968,
       "hardware_validated": false,
-      "context_bytes": 11128,
-      "stack_high_water_bytes": 2228,
-      "driver_executions": 2,
-      "fallbacks": 11,
-      "emulator": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)"
+      "machine": "lm3s6965evb",
+      "compiler": "clang version 23.1.2 (https://github.com/llvm/llvm-project 85ac560262434c9ccfc0c183ec22d4138ed647fb)",
+      "context_bytes": 11336,
+      "stack_high_water_bytes": 2428,
+      "driver_executions": 3,
+      "fallbacks": 13,
+      "interrupt_estop": 1,
+      "sink_frames": 4,
+      "timing_instructions": {
+        "submit_executed": {
+          "min": 2560,
+          "max": 2640
+        },
+        "submit_duplicate": {
+          "min": 1920,
+          "max": 2880
+        },
+        "submit_bound": {
+          "min": 2400,
+          "max": 2400
+        },
+        "submit_bad_crc": {
+          "min": 800,
+          "max": 880
+        },
+        "tick_idle": {
+          "min": 160,
+          "max": 240
+        },
+        "update_state_change": {
+          "min": 160,
+          "max": 320
+        },
+        "estop_two_fallbacks": {
+          "min": 1040,
+          "max": 1120
+        },
+        "receipt_read_newest": {
+          "min": 400,
+          "max": 480
+        }
+      },
+      "timing_method": "QEMU -icount shift=0 retired instructions, calibrated against a 200,000-instruction loop; worst-case inputs (full replay history and receipt ring); not cycles",
+      "emulator": "QEMU emulator version 11.1.0 (v11.1.0-12130-ge470268ff4)"
     },
     {
       "target": "riscv32imc-unknown-none-elf",
-      "text_bytes": 19296,
+      "text_bytes": 19556,
       "data_bytes": 0,
-      "bss_bytes": 16404,
-      "elf_bytes": 692036,
+      "bss_bytes": 16480,
+      "elf_bytes": 689324,
       "hardware_validated": false,
-      "context_bytes": 11128,
-      "stack_high_water_bytes": 2148,
-      "driver_executions": 2,
-      "fallbacks": 11,
-      "emulator": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)"
+      "machine": "virt",
+      "compiler": "clang version 23.1.2 (https://github.com/llvm/llvm-project 85ac560262434c9ccfc0c183ec22d4138ed647fb)",
+      "context_bytes": 11336,
+      "stack_high_water_bytes": 2372,
+      "driver_executions": 3,
+      "fallbacks": 13,
+      "interrupt_estop": 1,
+      "sink_frames": 4,
+      "timing_instructions": {
+        "submit_executed": {
+          "min": 5388,
+          "max": 5388
+        },
+        "submit_duplicate": {
+          "min": 4558,
+          "max": 5674
+        },
+        "submit_bound": {
+          "min": 5137,
+          "max": 5137
+        },
+        "submit_bad_crc": {
+          "min": 1566,
+          "max": 1566
+        },
+        "tick_idle": {
+          "min": 237,
+          "max": 237
+        },
+        "update_state_change": {
+          "min": 263,
+          "max": 348
+        },
+        "estop_two_fallbacks": {
+          "min": 3651,
+          "max": 3651
+        },
+        "receipt_read_newest": {
+          "min": 444,
+          "max": 444
+        }
+      },
+      "timing_method": "QEMU -icount shift=0 retired instructions, calibrated against a 200,000-instruction loop; worst-case inputs (full replay history and receipt ring); not cycles",
+      "emulator": "QEMU emulator version 11.1.0 (v11.1.0-12130-ge470268ff4)"
     }
   ]
 }

@@ -1,0 +1,12 @@
+# Verification code is not mutated: proofs.rs only compiles under Kani.
+exclude_globs = ["crates/runtime-core/src/proofs.rs", "crates/runtime-core/src/tests.rs"]
+
+# Equivalent mutants: survivors that cannot change behavior.
+exclude_re = [
+    # Safety-flag masks in the reference profile combine distinct bits: `|` equals `^`.
+    'profile\.rs:.*replace \| with \^',
+    # Capability IDs are unique, so OR-ing their bits equals XOR-ing them.
+    'replace \| with \^ in Runtime::acquire',
+    # ready() runs after tick(), which has already tripped on a regressed clock.
+    'replace < with > in Runtime::ready',
+]

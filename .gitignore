@@ -11,3 +11,8 @@ node_modules/
 .env
 .env.*
 !.env.example
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+/mutants.out*/

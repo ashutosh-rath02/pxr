@@ -401,6 +401,26 @@ fn run() -> Result<(), String> {
             println!();
             Ok(())
         }
+        Some("plant") if args.len() == 1 => {
+            for fault in plant::FAULTS {
+                let o = plant::run(
+                    fault,
+                    Default::default(),
+                    Config::default(),
+                    Default::default(),
+                );
+                println!(
+                    "{{\"fault\":\"{:?}\",\"detected_after_ms\":{},\"stopped_after_ms\":{},\"coast_mm\":{:.1},\"detection_bound_ms\":{},\"stop_bound_ms\":{},\"virtual_time\":true,\"hardware_validated\":false}}",
+                    o.fault,
+                    o.detected_after_ms.map_or("null".into(), |v| v.to_string()),
+                    o.stopped_after_ms.map_or("null".into(), |v| v.to_string()),
+                    o.coast_mm,
+                    o.detection_bound_ms,
+                    o.stop_bound_ms
+                );
+            }
+            Ok(())
+        }
         Some("--version") => {
             println!("pxr {}", env!("CARGO_PKG_VERSION"));
             Ok(())

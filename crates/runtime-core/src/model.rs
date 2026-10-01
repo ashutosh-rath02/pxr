@@ -1,7 +1,22 @@
-pub const MAX_CAPABILITIES: usize = 16;
-pub const MAX_RESOURCES: usize = 8;
-pub const REPLAY_CAPACITY: usize = 32;
-pub const RECEIPT_CAPACITY: usize = 64;
+use core::sync::atomic::{AtomicU32, Ordering};
+
+#[cfg(not(kani))]
+mod capacity {
+    pub const MAX_CAPABILITIES: usize = 16;
+    pub const MAX_RESOURCES: usize = 8;
+    pub const REPLAY_CAPACITY: usize = 32;
+    pub const RECEIPT_CAPACITY: usize = 64;
+}
+// Proofs use the smallest sizes the reference profile fits in. No code path depends on the
+// exact values, and small rings reach their full and evicting states in fewer steps.
+#[cfg(kani)]
+mod capacity {
+    pub const MAX_CAPABILITIES: usize = 4;
+    pub const MAX_RESOURCES: usize = 2;
+    pub const REPLAY_CAPACITY: usize = 4;
+    pub const RECEIPT_CAPACITY: usize = 8;
+}
+pub use capacity::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bounds {
@@ -155,6 +170,28 @@ pub trait Driver {
     fn observe(&mut self, resource: u8) -> Result<Observation, DriverError>;
     fn execute(&mut self, capability: u16, parameters: [i32; 2]) -> Result<(), DriverError>;
     fn fallback(&mut self, resource: u8, reason: Reason) -> Result<(), DriverError>;
+    /// Called once per recorded receipt, in order. Persist or sign it here to keep an audit
+    /// trail beyond the in-memory ring. Must be bounded; it cannot change the decision.
+    fn record_receipt(&mut self, _receipt: &Receipt) {}
+}
+
+/// Interrupt-safe e-stop request, polled by [`crate::Runtime::poll_estop`].
+#[derive(Debug, Default)]
+#[repr(transparent)]
+pub struct EstopSignal(AtomicU32);
+impl EstopSignal {
+    pub const fn new() -> Self {
+        Self(AtomicU32::new(0))
+    }
+    /// Safe from any interrupt or thread. Uses only load/store, so it also works on targets
+    /// without atomic read-modify-write; concurrent raises can merge but are never all lost.
+    pub fn raise(&self) {
+        let count = self.0.load(Ordering::Acquire);
+        self.0.store(count.wrapping_add(1), Ordering::Release);
+    }
+    pub fn raised(&self) -> u32 {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

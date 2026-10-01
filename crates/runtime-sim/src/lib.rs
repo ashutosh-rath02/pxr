@@ -1,6 +1,8 @@
 //! Simulated observations are evidence about this model, not about physical hardware.
 use pxr_runtime_core::{profile::*, *};
 
+pub mod plant;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SimDriver {
     pub velocity: [i32; 2],

@@ -1,0 +1,5 @@
+{"fault":"ControllerSilent","detected_after_ms":80,"stopped_after_ms":269,"coast_mm":99.6,"detection_bound_ms":110,"stop_bound_ms":301,"virtual_time":true,"hardware_validated":false}
+{"fault":"EstopPressed","detected_after_ms":0,"stopped_after_ms":189,"coast_mm":35.6,"detection_bound_ms":0,"stop_bound_ms":191,"virtual_time":true,"hardware_validated":false}
+{"fault":"ObstacleDetected","detected_after_ms":0,"stopped_after_ms":189,"coast_mm":35.6,"detection_bound_ms":10,"stop_bound_ms":201,"virtual_time":true,"hardware_validated":false}
+{"fault":"SensorFeedStale","detected_after_ms":240,"stopped_after_ms":429,"coast_mm":227.6,"detection_bound_ms":260,"stop_bound_ms":451,"virtual_time":true,"hardware_validated":false}
+{"fault":"SupervisorStall(200)","detected_after_ms":200,"stopped_after_ms":389,"coast_mm":195.6,"detection_bound_ms":210,"stop_bound_ms":401,"virtual_time":true,"hardware_validated":false}

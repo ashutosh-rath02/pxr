@@ -24,7 +24,10 @@ Use PXR when an AI system, planner, or remote application sends bounded commands
 and the device must decide whether each command is still authorized and valid.
 The application supplies the transport, authenticated identity, sensors, and drivers.
 
-**Status:** v0.2.0 developer preview. Host tests and Cortex-M/RISC-V emulation pass.
+**Status:** v0.2.0 developer preview. `main` also contains unreleased changes:
+an interrupt-safe e-stop signal, a receipt sink, eviction that protects executions,
+and a required `pxr_platform_panic` hook for freestanding C builds.
+Host tests and Cortex-M/RISC-V emulation pass.
 Physical board timing and actuator behavior require device-specific validation.
 
 ## Quickstart
@@ -89,9 +92,13 @@ Node.js 22+. Share a scenario with a URL such as
 
 - **Authority:** exclusive resource leases bind a principal to capabilities and limits.
 - **Freshness:** controller-clock deadlines, receive-relative TTL, boot IDs, and state epochs.
-- **Replay handling:** action-ID history and per-lease sequence checks precede dispatch.
+- **Replay handling:** per-lease sequence checks and a 32-entry action-ID history precede dispatch.
 - **Local supervision:** stream expiry, lease expiry, sensor freshness, and latched e-stop.
+  An interrupt-safe `EstopSignal` lets an ISR request e-stop; the next runtime call latches it.
 - **Evidence:** receipts record decisions, requested parameters, driver observations, and authority context.
+  When the 64-entry ring is full, rejected receipts are evicted first, so a flood of invalid
+  frames evicts at most the single oldest non-rejected receipt. `Driver::record_receipt` (C: `pxr_set_receipt_sink`) sees every
+  receipt, which lets the platform persist or sign the audit trail.
 
 The core uses fixed capacities: 16 capabilities, 8 resources, 32 replay entries,
 and 64 receipts. Action frames are 92 bytes; portable receipt frames are 140 bytes.
@@ -130,6 +137,10 @@ non-reentrant. Use a fresh boot ID and one monotonic controller clock. Supply
 trusted sensor updates and an independent hardware watchdog. C callers allocate
 storage using `pxr_context_size()` and `pxr_context_align()`; inspect the receipt
 decision after `pxr_submit`, since a zero return indicates a receipt was produced.
+Calls on storage that was never initialized, or whose initialization failed, return `-1`.
+
+Freestanding C archives call `pxr_platform_panic()`, which the firmware must define.
+It must force every actuator to its safe state, then reset or halt. It must never return.
 
 ## Benchmarks
 
@@ -142,10 +153,10 @@ enforces leases, boot/epoch checks, replay history, supervision, and receipts.
 
 | Path | Median batch cost per action, range across five runs |
 |---|---:|
-| Direct driver + observation check | 19.7–21.9 ns |
-| Small handwritten guard + driver | 21.5–23.8 ns |
-| PXR with a typed action | 70.5–79.0 ns |
-| PXR with frame decoding and CRC | 583.3–661.6 ns |
+| Direct driver + observation check | 22.9–26.5 ns |
+| Small handwritten guard + driver | 24.9–28.4 ns |
+| PXR with a typed action | 82.1–91.9 ns |
+| PXR with frame decoding and CRC | 614.4–711.7 ns |
 
 Measured on Windows 11 x86-64, Intel Core i7-1260P, Rust 1.98.1, release/LTO.
 Each run uses 200 batches of 1,024 actions per path after eight warmup batches.
@@ -174,13 +185,61 @@ in the SDK.
 
 | Test firmware | Linked code | C context | Observed stack use |
 |---|---:|---:|---:|
-| Cortex-M3 | 21,920 B | 11,128 B | 2,228 B |
-| RISC-V RV32IMC | 19,296 B | 11,128 B | 2,148 B |
+| Cortex-M3 | 22,672 B | 11,336 B | 2,428 B |
+| RISC-V RV32IMC | 19,556 B | 11,336 B | 2,372 B |
 
 Code includes the C harness and startup support. The harness reserves 16 KiB for
 context storage and 32 KiB for stack; observed stack use covers the exercised paths.
-The Rust runtime alone occupies 11,120 bytes on the measured 64-bit host.
-[Raw firmware measurements](docs/evidence/qemu.json)
+The Rust runtime alone occupies 11,312 bytes on the measured 64-bit host. The firmware
+also raises the e-stop signal from a real timer interrupt (SysTick and the RISC-V CLINT)
+while the main loop runs, then checks that the next call stops the motor.
+
+### Emulated instruction counts
+
+A separate [timing image](ports/qemu/timing.c) runs under QEMU `-icount shift=0` and on
+Renode's STM32F4 Discovery board model ([runner](ports/renode/run.py)).
+Each call is measured 32 times with the replay history and receipt ring already full,
+so every call takes its longest path. The table gives the worst case per call.
+
+| Call | RISC-V RV32IMC, QEMU (exact) | Cortex-M3, QEMU (±80) | STM32F407, Renode |
+|---|---:|---:|---:|
+| `pxr_submit`, executed | 5,388 | 2,640 | 2,629 |
+| `pxr_submit`, duplicate | 5,674 | 2,880 | 2,914 |
+| `pxr_submit`, out of bounds | 5,137 | 2,400 | 2,397 |
+| `pxr_submit`, corrupt CRC | 1,566 | 880 | 829 |
+| `pxr_tick`, idle | 237 | 240 | 186 |
+| `pxr_update_state`, flags changed | 348 | 320 | 290 |
+| `pxr_estop`, two fallbacks | 3,651 | 1,120 | 1,090 |
+
+These are emulated retired instructions, not cycles. Real cores add pipeline stalls,
+flash wait states, and bus contention, and QEMU does not model them. On Cortex-M the
+counter is SysTick, which QEMU advances once per 80 instructions; RISC-V uses `minstret`.
+Renode also uses SysTick, with finer resolution. All three are calibrated against a
+200,000-instruction loop. The Renode run also executes the functional firmware over the
+board's USART2, including the SysTick-raised e-stop.
+[QEMU counts](docs/evidence/qemu.json) · [Renode counts](docs/evidence/renode.json)
+
+### Plant-in-the-loop simulation
+
+[`pxr plant`](crates/runtime-sim/src/plant.rs) drives a simulated motor through PXR.
+The motor has a 40 ms first-order lag and a 5 ms command delay. A controller sends
+800 mm/s every 20 ms, and sensors and the supervisor run every 10 ms. A fault is
+injected at t = 1 s, and each result is checked against a bound derived from the
+configuration and loop timing.
+
+| Fault | Detected after | Motor stopped after | Coast distance |
+|---|---:|---:|---:|
+| Controller goes silent | 80 ms | 269 ms | 99.6 mm |
+| E-stop pressed | 0 ms | 189 ms | 35.6 mm |
+| Obstacle reported | 0 ms | 189 ms | 35.6 mm |
+| Sensor feed goes stale | 240 ms | 429 ms | 227.6 mm |
+| PXR's thread stalls for 200 ms | 200 ms | 389 ms | 195.6 mm |
+
+With the default configuration, sensor freshness (`state_ttl_ms` = 250) dominates the
+stopping distance, so lower it for fast actuators. A stalled PXR thread cannot stop
+anything until it resumes, so production systems need an independent hardware watchdog.
+"Stopped" means below 1% of cruise speed in this model; it is not a physical measurement.
+[Raw results](docs/evidence/plant.jsonl)
 
 ### External evaluation targets
 
@@ -196,11 +255,23 @@ needs the same host or board, policy, driver workload, and measurement boundarie
 
 ## Verification
 
-47 core/codec/conformance tests cover admission, lease scope, replay, time/epoch checks, e-stop
-recovery, driver failures, and receipt encoding. Coverage includes randomized
-fault transitions and exhaustive single-bit corruption of action/receipt frames.
+Core, codec, conformance, and C ABI tests cover admission, lease scope, replay, time/epoch
+checks, e-stop recovery, driver failures, and receipt encoding. Coverage includes exhaustive
+single-bit corruption of action/receipt frames and a model-based test that checks admission
+invariants after every step of long seeded random operation sequences with injected driver faults.
 CI runs on Linux, Windows, and macOS, checks Rust 1.85, links a C caller, and
-executes firmware on two emulated instruction sets. The playground adds four Rust
+executes firmware on two emulated instruction sets. Additional CI jobs:
+
+- [Kani](crates/runtime-core/src/proofs.rs) bounded proofs. Each harness covers every action
+  field, timestamp, sensor flag, and driver result in its scenario. They show that a
+  dispatched action passed every admission check, that e-stop blocks dispatch until local
+  recovery, that `tick` revokes expired or unsupervised leases, and that receipt IDs stay ordered.
+- [cargo-fuzz](fuzz/fuzz_targets) targets for both decoders and for codec-driven runtime operation sequences.
+- Miri with strict provenance over the C ABI entry points.
+- [cargo-mutants](.cargo/mutants.toml) on the core and codec; every non-equivalent mutant is killed.
+- Compile-time layout checks for every C struct, pinned in both `include/pxr.h` and Rust.
+
+The playground adds four Rust
 adapter tests, 14 checks against the compiled WebAssembly, and eight browser tests
 covering desktop/mobile interaction, receipt export, and runtime-loading failures.
 GitHub Pages deploys only after the full CI suite passes.
@@ -220,7 +291,12 @@ python3 ports/qemu/build.py
 
 `Executed` means the driver's immediate observation passed the configured checks.
 Physical completion depends on the driver's observation contract. Replay state is
-volatile; receipts are unsigned and their ring buffer overwrites old entries.
+volatile. Receipts are unsigned unless the platform signs them in its receipt sink,
+and the in-memory ring keeps only the most recent 64.
+Duplicate action IDs are detected within the last 32 admitted actions. An exact replay
+is always rejected, because each lease accepts a sequence number only once. However, an
+action ID reused with a new sequence number after 32 newer admitted actions executes
+again, even within the same lease. Retries must therefore be idempotent or use fresh IDs.
 Device-specific constraints, authenticated ingress, physical protection, and
 measured scheduling budgets remain the integrator's responsibility.
 

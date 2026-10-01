@@ -17,14 +17,30 @@ pub enum DecodeError {
     Value,
 }
 
+// 4-bit table: 64 bytes of flash instead of 1 KiB, roughly 4x faster than bitwise on MCUs.
+const NIBBLE: [u32; 16] = {
+    let mut table = [0u32; 16];
+    let mut n = 0;
+    while n < 16 {
+        let mut crc = n as u32;
+        let mut bit = 0;
+        while bit < 4 {
+            crc = (crc >> 1) ^ (0xedb88320 & (0u32.wrapping_sub(crc & 1)));
+            bit += 1;
+        }
+        table[n] = crc;
+        n += 1;
+    }
+    table
+};
+
 /// CRC-32/ISO-HDLC, polynomial 0xedb88320, initial/final XOR 0xffffffff.
 pub fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = !0u32;
     for byte in bytes {
         crc ^= *byte as u32;
-        for _ in 0..8 {
-            crc = (crc >> 1) ^ (0xedb88320 & (0u32.wrapping_sub(crc & 1)));
-        }
+        crc = (crc >> 4) ^ NIBBLE[(crc & 15) as usize];
+        crc = (crc >> 4) ^ NIBBLE[(crc & 15) as usize];
     }
     !crc
 }

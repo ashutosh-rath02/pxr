@@ -8,13 +8,19 @@ use core::{
 use pxr_runtime_core::{profile::CAPABILITIES, *};
 mod sdk;
 pub use sdk::*;
+#[cfg(test)]
+mod tests;
 
+#[cfg(not(feature = "std"))]
+extern "C" {
+    /// Supplied by the freestanding integrator: force actuators safe, then reset or halt.
+    fn pxr_platform_panic() -> !;
+}
 #[cfg(not(feature = "std"))]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
-    loop {
-        core::hint::spin_loop();
-    }
+    // SAFETY: link-time contract documented in include/pxr.h; the hook never returns.
+    unsafe { pxr_platform_panic() }
 }
 
 #[repr(C)]
@@ -135,12 +141,76 @@ impl From<Receipt> for CReceipt {
         }
     }
 }
+// Pinned to the same numbers as the PXR_ASSERT_LAYOUT checks in include/pxr.h.
+const _: () = {
+    use core::mem::offset_of;
+    assert!(size_of::<CObservation>() == 12);
+    assert!(size_of::<Callbacks>() == 4 * size_of::<usize>());
+    assert!(size_of::<CCapability>() == 40 && offset_of!(CCapability, min) == 8);
+    assert!(offset_of!(CCapability, verify_value) == 36);
+    assert!(size_of::<CLease>() == 24);
+    assert!(size_of::<CReceipt>() == 104 && offset_of!(CReceipt, requested) == 72);
+    assert!(offset_of!(CReceipt, capability) == 96 && offset_of!(CReceipt, decision) == 100);
+    assert!(size_of::<sdk::CAction>() == 80 && offset_of!(sdk::CAction, valid_for_ms) == 64);
+    assert!(offset_of!(sdk::CAction, capability) == 76);
+    assert!(size_of::<sdk::CConfig>() == 24 && offset_of!(sdk::CConfig, invalid_limit) == 20);
+    assert!(size_of::<sdk::CSnapshot>() == 48 && offset_of!(sdk::CSnapshot, flags) == 40);
+    assert!(size_of::<CEstopSignal>() == 4 && align_of::<CEstopSignal>() == 4);
+};
+
+/// Receives each receipt as a canonical 140-byte frame, e.g. to persist or sign it.
+pub type ReceiptSink = unsafe extern "C" fn(*mut c_void, *const u8);
+
+struct Host {
+    callbacks: Callbacks,
+    sink: Option<ReceiptSink>,
+    sink_user: *mut c_void,
+}
+impl Driver for Host {
+    fn observe(&mut self, resource: u8) -> Result<Observation, DriverError> {
+        self.callbacks.observe(resource)
+    }
+    fn execute(&mut self, capability: u16, parameters: [i32; 2]) -> Result<(), DriverError> {
+        self.callbacks.execute(capability, parameters)
+    }
+    fn fallback(&mut self, resource: u8, reason: Reason) -> Result<(), DriverError> {
+        self.callbacks.fallback(resource, reason)
+    }
+    fn record_receipt(&mut self, receipt: &Receipt) {
+        if let Some(sink) = self.sink {
+            let frame = pxr_runtime_codec::encode_receipt(receipt);
+            // SAFETY: sink and user pointer lifetimes are the integrator's contract (pxr.h).
+            unsafe { sink(self.sink_user, frame.as_ptr()) }
+        }
+    }
+}
+
+/// Interrupt-safe e-stop request with the layout of a `uint32_t`.
+#[repr(transparent)]
+pub struct CEstopSignal(pub EstopSignal);
+
+const MAGIC: u32 = 0x3152_5850;
 struct Context {
+    magic: u32,
     runtime: Runtime,
-    driver: Callbacks,
+    driver: Host,
+    estop: *const CEstopSignal,
 }
 fn valid_pointer<T>(p: *const T) -> bool {
     !p.is_null() && (p as usize) % align_of::<T>() == 0
+}
+/// # Safety
+/// A non-null aligned `ctx` must reference readable storage of at least context size.
+unsafe fn valid_context(ctx: *const c_void) -> bool {
+    let c = ctx.cast::<Context>();
+    // SAFETY: alignment checked first; size is the caller's contract.
+    valid_pointer(c) && unsafe { ptr::addr_of!((*c).magic).read() } == MAGIC
+}
+fn poll(c: &mut Context, now: u64) {
+    // SAFETY: an attached signal outlives the context (pxr.h contract).
+    if let Some(signal) = unsafe { c.estop.as_ref() } {
+        c.runtime.poll_estop(&signal.0, now, &mut c.driver);
+    }
 }
 
 #[no_mangle]
@@ -189,7 +259,7 @@ unsafe fn initialize(
     boot_id: u64,
     now: u64,
     initial_flags: u32,
-    mut callbacks: Callbacks,
+    callbacks: Callbacks,
     caps: &[Capability],
     config: Config,
 ) -> i32 {
@@ -201,7 +271,14 @@ unsafe fn initialize(
     {
         return -1;
     }
-    let runtime = match Runtime::new(config, caps, boot_id, now, initial_flags, &mut callbacks) {
+    // SAFETY: storage is aligned and large enough; clearing the marker invalidates old contents.
+    unsafe { ptr::addr_of_mut!((*storage.cast::<Context>()).magic).write(0) };
+    let mut host = Host {
+        callbacks,
+        sink: None,
+        sink_user: ptr::null_mut(),
+    };
+    let runtime = match Runtime::new(config, caps, boot_id, now, initial_flags, &mut host) {
         Ok(r) => r,
         Err(_) => return -3,
     };
@@ -210,8 +287,10 @@ unsafe fn initialize(
         ptr::write(
             storage.cast::<Context>(),
             Context {
+                magic: MAGIC,
                 runtime,
-                driver: callbacks,
+                driver: host,
+                estop: ptr::null(),
             },
         );
     }
@@ -308,11 +387,12 @@ pub unsafe extern "C" fn pxr_acquire(
     now: u64,
     out: *mut CLease,
 ) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) || !valid_pointer(out) {
+    if !unsafe { valid_context(ctx) } || !valid_pointer(out) {
         return -1;
     }
     // SAFETY: caller guarantees initialized exclusive context and separate output.
     let ctx = unsafe { &mut *ctx.cast::<Context>() };
+    poll(ctx, now);
     match ctx.runtime.acquire(
         LeaseRequest {
             owner,
@@ -363,7 +443,7 @@ pub unsafe extern "C" fn pxr_submit(
     now: u64,
     out: *mut CReceipt,
 ) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) || frame.is_null() || !valid_pointer(out) {
+    if !unsafe { valid_context(ctx) } || frame.is_null() || !valid_pointer(out) {
         return -1;
     }
     if length != pxr_runtime_codec::FRAME_SIZE {
@@ -376,6 +456,7 @@ pub unsafe extern "C" fn pxr_submit(
     };
     // SAFETY: caller guarantees initialized exclusive context and non-aliasing output.
     let ctx = unsafe { &mut *ctx.cast::<Context>() };
+    poll(ctx, now);
     let receipt = ctx
         .runtime
         .submit(action, principal, received_at, now, &mut ctx.driver);
@@ -386,13 +467,15 @@ pub unsafe extern "C" fn pxr_submit(
 }
 
 /// # Safety
-/// ctx is initialized exclusive storage. Call independently of ingress, at least every 50 ms.
+/// ctx is initialized exclusive storage. Call independently of ingress, at least once per
+/// configured watchdog period (50 ms by default).
 #[no_mangle]
 pub unsafe extern "C" fn pxr_tick(ctx: *mut c_void, now: u64) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) {
+    if !unsafe { valid_context(ctx) } {
         return -1;
     }
     let c = unsafe { &mut *ctx.cast::<Context>() };
+    poll(c, now);
     c.runtime.tick(now, &mut c.driver);
     c.runtime.state() as i32
 }
@@ -400,10 +483,11 @@ pub unsafe extern "C" fn pxr_tick(ctx: *mut c_void, now: u64) -> i32 {
 /// ctx is initialized exclusive storage; flags are from trusted local sensors.
 #[no_mangle]
 pub unsafe extern "C" fn pxr_update_state(ctx: *mut c_void, flags: u32, now: u64) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) {
+    if !unsafe { valid_context(ctx) } {
         return -1;
     }
     let c = unsafe { &mut *ctx.cast::<Context>() };
+    poll(c, now);
     c.runtime.update_state(flags, now, &mut c.driver);
     c.runtime.state() as i32
 }
@@ -411,7 +495,7 @@ pub unsafe extern "C" fn pxr_update_state(ctx: *mut c_void, flags: u32, now: u64
 /// ctx is initialized exclusive storage. This local API must bypass remote action queues.
 #[no_mangle]
 pub unsafe extern "C" fn pxr_estop(ctx: *mut c_void, now: u64) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) {
+    if !unsafe { valid_context(ctx) } {
         return -1;
     }
     let c = unsafe { &mut *ctx.cast::<Context>() };
@@ -422,10 +506,11 @@ pub unsafe extern "C" fn pxr_estop(ctx: *mut c_void, now: u64) -> i32 {
 /// ctx is initialized exclusive storage. Only trusted local recovery may call this function.
 #[no_mangle]
 pub unsafe extern "C" fn pxr_recover_local(ctx: *mut c_void, now: u64) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) {
+    if !unsafe { valid_context(ctx) } {
         return -1;
     }
     let c = unsafe { &mut *ctx.cast::<Context>() };
+    poll(c, now);
     c.runtime
         .recover_local(now, &mut c.driver)
         .map_or_else(|e| e as i32, |_| 0)
@@ -442,10 +527,11 @@ pub unsafe extern "C" fn pxr_renew(
     now: u64,
     out: *mut CLease,
 ) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) || !valid_pointer(out) {
+    if !unsafe { valid_context(ctx) } || !valid_pointer(out) {
         return -1;
     }
     let c = unsafe { &mut *ctx.cast::<Context>() };
+    poll(c, now);
     match c
         .runtime
         .renew(owner, lease, renewal, duration, now, &mut c.driver)
@@ -470,10 +556,11 @@ pub unsafe extern "C" fn pxr_renew(
 /// ctx is initialized exclusive storage; owner must be established by the authority adapter.
 #[no_mangle]
 pub unsafe extern "C" fn pxr_cancel(ctx: *mut c_void, owner: u64, lease: u64, now: u64) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) {
+    if !unsafe { valid_context(ctx) } {
         return -1;
     }
     let c = unsafe { &mut *ctx.cast::<Context>() };
+    poll(c, now);
     c.runtime
         .cancel(owner, lease, now, &mut c.driver)
         .map_or_else(|e| e as i32, |_| 0)
@@ -482,7 +569,7 @@ pub unsafe extern "C" fn pxr_cancel(ctx: *mut c_void, owner: u64, lease: u64, no
 /// ctx is initialized readable storage; it must not be concurrently mutated.
 #[no_mangle]
 pub unsafe extern "C" fn pxr_epoch(ctx: *const c_void) -> u64 {
-    if !valid_pointer(ctx.cast::<Context>()) {
+    if !unsafe { valid_context(ctx) } {
         return 0;
     }
     unsafe { (&*ctx.cast::<Context>()).runtime.epoch() }
@@ -491,7 +578,7 @@ pub unsafe extern "C" fn pxr_epoch(ctx: *const c_void) -> u64 {
 /// ctx is initialized readable storage; out is aligned writable and does not alias it.
 #[no_mangle]
 pub unsafe extern "C" fn pxr_receipt(ctx: *const c_void, index: usize, out: *mut CReceipt) -> i32 {
-    if !valid_pointer(ctx.cast::<Context>()) || !valid_pointer(out) {
+    if !unsafe { valid_context(ctx) } || !valid_pointer(out) {
         return -1;
     }
     let c = unsafe { &*ctx.cast::<Context>() };
@@ -504,4 +591,49 @@ pub unsafe extern "C" fn pxr_receipt(ctx: *const c_void, index: usize, out: *mut
         }
         None => -4,
     }
+}
+
+/// Raise an e-stop request. Safe to call from any interrupt handler; the runtime latches
+/// e-stop on its next call that takes a timestamp.
+/// # Safety
+/// signal is null or points to a live, aligned pxr_estop_signal.
+#[no_mangle]
+pub unsafe extern "C" fn pxr_estop_signal_raise(signal: *const CEstopSignal) {
+    // SAFETY: caller contract; shared access to an atomic is sound from any context.
+    if let Some(signal) = unsafe { signal.as_ref() } {
+        signal.0.raise();
+    }
+}
+/// Poll `signal` (null detaches) at the start of every timestamped call on this context.
+/// # Safety
+/// ctx is initialized exclusive storage; signal outlives every later use of ctx.
+#[no_mangle]
+pub unsafe extern "C" fn pxr_attach_estop_signal(
+    ctx: *mut c_void,
+    signal: *const CEstopSignal,
+) -> i32 {
+    if !unsafe { valid_context(ctx) } || (!signal.is_null() && !valid_pointer(signal)) {
+        return -1;
+    }
+    // SAFETY: validated initialized context.
+    unsafe { (*ctx.cast::<Context>()).estop = signal };
+    0
+}
+/// Deliver every subsequent receipt to `sink` as a 140-byte frame (null detaches).
+/// # Safety
+/// ctx is initialized exclusive storage; sink and user stay valid for every later call.
+#[no_mangle]
+pub unsafe extern "C" fn pxr_set_receipt_sink(
+    ctx: *mut c_void,
+    sink: Option<ReceiptSink>,
+    user: *mut c_void,
+) -> i32 {
+    if !unsafe { valid_context(ctx) } {
+        return -1;
+    }
+    // SAFETY: validated initialized context.
+    let host = unsafe { &mut (*ctx.cast::<Context>()).driver };
+    host.sink = sink;
+    host.sink_user = user;
+    0
 }

@@ -25,6 +25,9 @@ jobs:
       - if: runner.os == 'Windows'
         run: python scripts/verify_cli.py target/release/pxr.exe
       - if: runner.os == 'Linux'
+        name: Plant simulation matches published evidence
+        run: ./target/release/pxr plant | diff -u docs/evidence/plant.jsonl -
+      - if: runner.os == 'Linux'
         run: |
           cc -std=c11 -Wall -Wextra -Werror -Iinclude examples/c-embedding/main.c target/release/libpxr_runtime_c_api.a -ldl -lpthread -lm -o target/c-embedding
           ./target/c-embedding
@@ -74,12 +77,84 @@ jobs:
           path: |
             target/qemu/
             artifact-manifest.json
+  renode-board-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+      - run: rustup target add thumbv7em-none-eabi
+      - name: Install Renode 1.17.0 (pinned by SHA-256)
+        run: |
+          curl -fsSL -o renode.tar.gz https://github.com/renode/renode/releases/download/v1.17.0/renode-1.17.0.linux-portable.tar.gz
+          echo "4ba7c68b59e2447f188ef4b4b112fcccd2802582c460beedceb63b84e5605a5f  renode.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/renode"
+          tar -xzf renode.tar.gz -C "$RUNNER_TEMP/renode" --strip-components=1
+      - run: python3 ports/renode/run.py
+        env:
+          RENODE: ${{ runner.temp }}/renode/renode
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: renode-board-model
+          path: target/renode/
   msrv:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: rustup toolchain install 1.85.0 --profile minimal
       - run: cargo +1.85.0 test --workspace --locked
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: rustup toolchain install nightly --profile minimal --component miri,rust-src
+      - run: cargo +nightly miri test --locked -p pxr-runtime-c-api
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+  kani:
+    strategy:
+      fail-fast: false
+      matrix:
+        harness:
+          - submit_dispatches_only_admissible_actions
+          - emergency_stop_blocks_dispatch_until_local_recovery
+          - tick_revokes_expired_or_unsupervised_authority
+          - receipts_never_wrap_or_lose_order
+          - raised_estop_signal_blocks_the_next_dispatch
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: cargo install --locked kani-verifier --version 0.68.0
+      - run: cargo kani setup
+      - run: cargo kani -p pxr-runtime-core --harness ${{ matrix.harness }}
+  fuzz:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [decode_action, decode_receipt, runtime_ops]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: rustup toolchain install nightly --profile minimal
+      - run: cargo install --locked cargo-fuzz --version 0.13.2
+      - run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=180
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: failure()
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/
+  mutants:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: cargo install --locked cargo-mutants --version 27.1.0
+      - run: cargo mutants -p pxr-runtime-core -p pxr-runtime-codec --test-workspace=true -j 4 --timeout 180
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: mutants
+          path: mutants.out/
   playground:
     runs-on: ubuntu-latest
     steps:
@@ -106,7 +181,7 @@ jobs:
           path: dist/playground
   deploy-playground:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [host, embedded, emulated-firmware, msrv, playground]
+    needs: [host, embedded, emulated-firmware, renode-board-model, msrv, miri, kani, fuzz, playground]
     runs-on: ubuntu-latest
     permissions:
       actions: read
