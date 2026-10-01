@@ -129,6 +129,7 @@ jobs:
       - run: cargo kani -p pxr-runtime-core --harness ${{ matrix.harness }}
   fuzz:
     strategy:
+      fail-fast: false
       matrix:
         target: [decode_action, decode_receipt, runtime_ops]
     runs-on: ubuntu-latest
